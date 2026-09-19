@@ -180,7 +180,7 @@
 @layer components {
   .app-shell {
     display: grid;
-    grid-template-columns: 224px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
     min-height: 100dvh;
   }
   .sidebar {
@@ -197,7 +197,7 @@
     gap: 10px;
     padding: 0 10px 12px;
     font-family: var(--font-heading);
-    font-size: 23px;
+    font-size: 21px;
     font-weight: 600;
   }
   .sidebar nav {
@@ -523,7 +523,8 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
@@ -535,6 +536,8 @@
     font-size: 20px;
   }
   .sidebar nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
     flex-direction: row;
   }
   .sidebar .project-list,
@@ -543,6 +546,8 @@
     display: none;
   }
   .sidebar-bottom {
+    grid-column: 2;
+    grid-row: 1;
     margin-left: auto;
     padding: 0;
     border: 0;
@@ -584,4 +589,22 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.graph-scroll {
+  overflow: auto;
+  max-height: 560px;
+  border: 1px solid var(--border);
+}
+.function-graph {
+  display: block;
+  width: 100%;
+  min-width: 700px;
+}
+.graph-node {
+  cursor: pointer;
+}
+.graph-node:focus-visible circle {
+  stroke: var(--foreground);
+  stroke-width: 4;
 }

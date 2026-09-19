@@ -9,7 +9,7 @@ repository = "https://github.com/AlexProgrammerDE/PistonDecompiler"
 homepage = "https://decompiler.pistonmaster.net"
 
 [[bin]]
-name = "piston"
+name = "pistondecompiler"
 path = "src/main.rs"
 
 [dependencies]
@@ -39,6 +39,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
+rig-core = { version = "0.42.0", default-features = false, features = ["reqwest", "rustls"] }
 
 [build-dependencies]
 protoc-bin-vendored = "3"

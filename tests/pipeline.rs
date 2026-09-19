@@ -30,6 +30,7 @@ fn completion() -> Completion {
             proposed_name: "increment_value".into(),
             summary: "Adds a constant to the input.".into(),
             confidence: 0.9,
+            claims: vec![],
             evidence: vec!["One integer addition".into()],
             parameter_types: vec![],
             side_effects: vec![],
@@ -68,7 +69,7 @@ async fn concurrent_claims_are_unique_and_reservations_bound_spend() {
     assert!(overview.paused);
 }
 #[tokio::test]
-async fn completion_is_idempotent_and_propagation_waits_for_map() {
+async fn completion_is_idempotent_without_automatic_second_pass() {
     let (_dir, db, ai) = fixture().await;
     let job = pipeline::claim(&db, &ai, None, false)
         .await
@@ -182,8 +183,9 @@ async fn evidence_agent_uses_bounded_tools_and_accounts_all_rounds() {
         let seen=seen.clone();async move {
             let index=seen.fetch_add(1,Ordering::SeqCst);
             assert!(body["messages"].as_array().unwrap().len()>=2);
-            let message=if index==0 {json!({"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"inspect_function","arguments":"{\"address\":\"00000000\",\"kind\":\"pseudocode\"}"}}]})} else {json!({"role":"assistant","content":serde_json::to_string(&completion().analysis).unwrap()})};
-            Json(json!({"choices":[{"message":message}],"usage":{"prompt_tokens":100,"completion_tokens":20}}))
+            assert_eq!(body["messages"][0]["role"],"system");
+            let message=if index==0 {json!({"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"inspect_function","arguments":"{\"address\":\"00000000\",\"kind\":\"pseudocode\"}"}}]})} else {json!({"role":"assistant","content":({let mut analysis=completion().analysis; let user=body["messages"].as_array().unwrap().iter().find(|m|m["role"]=="user").unwrap(); let content=user["content"].as_str().map(str::to_owned).unwrap_or_else(||user["content"][0]["text"].as_str().unwrap().to_owned());let context:serde_json::Value=serde_json::from_str(&content).unwrap();analysis.claims=vec![piston_decompiler::ai::Claim{text:"Adds a constant.".into(),references:vec![piston_decompiler::ai::EvidenceReference{artifact_id:context["evidence"][0]["artifact_id"].as_str().unwrap().into(),start_line:1,end_line:1}]}];serde_json::to_string(&analysis).unwrap()})})};
+            Json(json!({"id":"fixture-response","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"finish_reason":"stop","message":message}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}))
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -217,6 +219,11 @@ async fn prompt_packing_keeps_structured_evidence_within_escaped_budget() {
         .execute(&db.pool)
         .await
         .unwrap();
+    sqlx::query("UPDATE artifacts SET content=? WHERE kind='pseudocode'")
+        .bind(&hostile)
+        .execute(&db.pool)
+        .await
+        .unwrap();
     for budget in [4096, 4097, 8192, 24000, 100000] {
         ai.config.max_input_bytes = budget;
         let prompt = ai.prompt(&db, "b:00000001", "map").await.unwrap();
@@ -224,10 +231,10 @@ async fn prompt_packing_keeps_structured_evidence_within_escaped_budget() {
         let context: serde_json::Value =
             serde_json::from_str(prompt.messages[1]["content"].as_str().unwrap()).unwrap();
         assert_eq!(context["address"], "00000001");
-        let code = context["pseudocode"].as_str().unwrap();
-        assert!(!code.is_empty());
-        assert!(hostile.starts_with(code));
-        assert!(context["strings"].is_array());
+        assert!(context["evidence"].is_array());
+        for evidence in &prompt.evidence {
+            assert!(!evidence.content.is_empty());
+        }
         assert!(context["callees"].is_array());
         assert_eq!(
             prompt.hash,

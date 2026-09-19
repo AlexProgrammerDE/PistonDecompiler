@@ -14,12 +14,12 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
 #[command(
-    name = "piston",
+    name = "pistondecompiler",
     version,
     about = "Persistent Ghidra and AI binary analysis"
 )]
 struct Cli {
-    #[arg(long, default_value = "piston.toml", global = true)]
+    #[arg(long, default_value = "pistondecompiler.toml", global = true)]
     config: PathBuf,
     #[command(subcommand)]
     command: Command,
@@ -35,27 +35,43 @@ enum Command {
         extract: bool,
     },
     /// Run Ghidra headless extraction and build indexes.
-    Extract { binary: String },
+    Extract {
+        binary: String,
+    },
     /// Import a previously exported PistonExport JSONL file.
-    ImportExport { binary: String, path: PathBuf },
+    ImportExport {
+        binary: String,
+        path: PathBuf,
+    },
     /// Run queued AI work until complete, paused or interrupted.
-    Run { binary: String },
+    Run {
+        binary: String,
+    },
     /// Inspect binary status and accounting as JSON.
-    Status { binary: Option<String> },
+    Status {
+        binary: Option<String>,
+    },
     /// Pause, resume, or retry failed/uncertain jobs.
     Control {
         binary: String,
-        #[arg(value_parser=["pause","resume","retry"])]
+        #[arg(value_parser=["pause","resume","retry","all"])]
         action: String,
     },
-    /// Accept or reject the latest proposal for a function.
+    /// Review an exact result revision.
     Review {
-        function: String,
+        result: String,
+        #[arg(long)]
+        revision: u32,
         #[arg(long)]
         accept: bool,
     },
     /// Apply accepted proposals through the single Ghidra writer.
-    Apply { binary: String },
+    Preview {
+        binary: String,
+    },
+    Apply {
+        operation: String,
+    },
     /// Manage true asynchronous provider batches.
     Batch {
         #[command(subcommand)]
@@ -138,13 +154,35 @@ async fn main() -> Result<()> {
         Command::Control { binary, action } => {
             pipeline::control(&db, &ai, &binary, &action).await?
         }
-        Command::Review { function, accept } => pipeline::review(&db, &function, accept).await?,
-        Command::Apply { binary } => {
-            println!(
-                "Applied {} proposals",
-                ghidra::apply(&db, &config, &binary).await?
-            );
+        Command::Review {
+            result,
+            revision,
+            accept,
+        } => {
+            pipeline::review(
+                &db,
+                &piston_decompiler::proto::ReviewRequest {
+                    result_id: result,
+                    expected_revision: revision,
+                    field: "both".into(),
+                    decision: if accept { "accepted" } else { "rejected" }.into(),
+                    reason: String::new(),
+                },
+            )
+            .await?
         }
+        Command::Preview { binary } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &piston_decompiler::knowledge::preview_apply(&db, &binary).await?
+            )?
+        ),
+        Command::Apply { operation } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &ghidra::execute_apply(&db, &config, &operation, None).await?
+            )?
+        ),
         Command::Run { binary } => {
             pipeline::control(&db, &ai, &binary, "resume").await?;
             // CLI run is scoped to this binary. Other projects remain paused.
@@ -164,7 +202,7 @@ async fn main() -> Result<()> {
                     pipeline::RunState::Work | pipeline::RunState::Waiting => {}
                     pipeline::RunState::BatchBlocked => {
                         eprintln!(
-                            "Local analysis is waiting for an asynchronous provider batch. Run `piston batch list`, then collect the completed batch."
+                            "Local analysis is waiting for an asynchronous provider batch. Run `pistondecompiler batch list`, then collect the completed batch."
                         );
                         break;
                     }

@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use piston_decompiler::{config::Config, db::Db, ghidra, pipeline};
+use piston_decompiler::{config::Config, db::Db, ghidra, knowledge, pipeline, proto};
 use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio_util::sync::CancellationToken;
 
@@ -34,6 +34,14 @@ async fn fixture(script: &str) -> (tempfile::TempDir, Db, Config) {
         .execute(&db.pool)
         .await
         .unwrap();
+    sqlx::query("UPDATE results SET name_review='accepted',summary_review='accepted'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE functions SET current_result_id='result'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
     let config = Config {
         data_dir: data,
         ghidra_home: Some(home),
@@ -43,31 +51,52 @@ async fn fixture(script: &str) -> (tempfile::TempDir, Db, Config) {
     (directory, db, config)
 }
 
-async fn review(db: &Db) -> String {
-    sqlx::query_scalar("SELECT review FROM results WHERE id='result'")
-        .fetch_one(&db.pool)
-        .await
-        .unwrap()
+fn reject() -> proto::ReviewRequest {
+    proto::ReviewRequest {
+        result_id: "result".into(),
+        expected_revision: 0,
+        field: "both".into(),
+        decision: "rejected".into(),
+        reason: String::new(),
+    }
 }
-
 #[tokio::test]
 async fn successful_writeback_is_idempotent() {
-    let (_directory, db, config) = fixture("#!/bin/sh\nexit 0\n").await;
-    assert_eq!(ghidra::apply(&db, &config, "b").await.unwrap(), 1);
-    assert_eq!(review(&db).await, "applied");
-    assert_eq!(ghidra::apply(&db, &config, "b").await.unwrap(), 0);
-    assert!(pipeline::review(&db, "b:1000", false).await.is_err());
+    let (_directory,db,config)=fixture("#!/bin/sh\nfor arg in \"$@\"; do prev=$last; last=$arg; done\npython3 - \"$prev\" \"$last\" <<'PYREPORT'\nimport json,sys\nitems=json.load(open(sys.argv[1]))\nfor item in items: item['status']='applied'; item['error']=''\njson.dump(items,open(sys.argv[2],'w'))\nPYREPORT\n").await;
+    let preview = knowledge::preview_apply(&db, "b").await.unwrap();
+    assert_eq!(preview.items.len(), 1);
+    let applied = ghidra::execute_apply(&db, &config, &preview.id, None)
+        .await
+        .unwrap();
+    assert_eq!(applied.status, "applied");
+    assert!(
+        ghidra::execute_apply(&db, &config, &preview.id, None)
+            .await
+            .is_err()
+    );
+    assert!(
+        knowledge::preview_apply(&db, "b")
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        knowledge::result(&db, "result").await.unwrap().name_review,
+        "accepted"
+    );
 }
-
 #[tokio::test]
-async fn cancellation_blocks_concurrent_review_and_restores_acceptance() {
+async fn cancellation_blocks_review_and_retains_uncertain_operation() {
     let (_directory, db, config) = fixture("#!/bin/sh\ntouch \"$1/started\"\nsleep 300\n").await;
     let started = config.data_dir.join("binaries/b/ghidra/started");
+    let preview = knowledge::preview_apply(&db, "b").await.unwrap();
     let cancel = CancellationToken::new();
-    let task_db = db.clone();
     let task_cancel = cancel.clone();
+    let task_db = db.clone();
+    let id = preview.id.clone();
     let task = tokio::spawn(async move {
-        ghidra::apply_cancellable(&task_db, &config, "b", task_cancel).await
+        ghidra::execute_apply(&task_db, &config, &id, Some(task_cancel)).await
     });
     for _ in 0..100 {
         if started.is_file() {
@@ -76,16 +105,16 @@ async fn cancellation_blocks_concurrent_review_and_restores_acceptance() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert!(Path::new(&started).is_file());
-    assert_eq!(review(&db).await, "applying");
-    assert!(pipeline::review(&db, "b:1000", false).await.is_err());
+    assert!(pipeline::review(&db, &reject()).await.is_err());
     cancel.cancel();
     assert!(task.await.unwrap().is_err());
-    assert_eq!(review(&db).await, "accepted");
-
-    sqlx::query("UPDATE results SET review='applying' WHERE id='result'")
-        .execute(&db.pool)
-        .await
-        .unwrap();
+    assert_eq!(
+        knowledge::apply_operation(&db, &preview.id)
+            .await
+            .unwrap()
+            .status,
+        "uncertain"
+    );
     db.recover().await.unwrap();
-    assert_eq!(review(&db).await, "accepted");
+    assert!(pipeline::review(&db, &reject()).await.is_err());
 }

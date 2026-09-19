@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub data_dir: PathBuf,
@@ -13,7 +13,7 @@ pub struct Config {
     pub ghidra_timeout_secs: u64,
     pub ai: AiConfig,
 }
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AiConfig {
     pub base_url: String,
@@ -28,7 +28,6 @@ pub struct AiConfig {
     pub escalation_output_usd_per_million: f64,
     pub max_input_bytes: usize,
     pub max_output_tokens: u32,
-    pub confidence_threshold: f64,
     pub max_attempts: u32,
     pub request_timeout_secs: u64,
     pub batch_enabled: bool,
@@ -52,7 +51,7 @@ impl Default for AiConfig {
     fn default() -> Self {
         Self {
             base_url: "https://openrouter.ai/api/v1".into(),
-            api_key_env: "PISTON_AI_API_KEY".into(),
+            api_key_env: "PISTONDECOMPILER_AI_API_KEY".into(),
             model: String::new(),
             escalation_model: String::new(),
             concurrency: 4,
@@ -63,7 +62,6 @@ impl Default for AiConfig {
             escalation_output_usd_per_million: 0.0,
             max_input_bytes: 24000,
             max_output_tokens: 1000,
-            confidence_threshold: 0.7,
             max_attempts: 3,
             request_timeout_secs: 120,
             batch_enabled: false,
@@ -76,7 +74,7 @@ impl Config {
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let config: Self = if path.exists() {
             toml::from_str(&std::fs::read_to_string(path)?)
-                .context("invalid piston configuration")?
+                .context("invalid PistonDecompiler configuration")?
         } else {
             Self::default()
         };
@@ -104,10 +102,6 @@ impl Config {
         ensure!(
             ai.budget_usd.is_finite() && ai.budget_usd > 0.0,
             "budget must be positive"
-        );
-        ensure!(
-            ai.confidence_threshold.is_finite() && (0.0..=1.0).contains(&ai.confidence_threshold),
-            "invalid confidence threshold"
         );
         ensure!(
             ai.request_timeout_secs > 0 && config.ghidra_timeout_secs > 0,

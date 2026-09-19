@@ -1,8 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { CheckIcon, XIcon } from "@phosphor-icons/react"
-import { api, invalidateBinary } from "@/lib/api"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { ResultReview, ResultHistory } from "@/components/ResultReview"
+import { useQuery } from "@tanstack/react-query"
+import { api } from "@/lib/api"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { EmptyNotice, ErrorNotice, LoadingRows } from "@/components/Feedback"
 
@@ -20,11 +18,6 @@ export function FunctionDetail({
     queryFn: ({ signal }) => api.getFunction({ id }, { signal }),
     enabled: !!id,
     refetchInterval: 3000,
-  })
-  const mutation = useMutation({
-    mutationFn: (accept: boolean) =>
-      api.reviewProposal({ functionId: id, accept }),
-    onSuccess: () => invalidateBinary(binaryId),
   })
   const detail = query.data
   const f = detail?.function
@@ -50,58 +43,24 @@ export function FunctionDetail({
               {f.module} · {f.callers} callers · {f.callees} callees
             </p>
           </div>
-          {f.summary ? (
-            <section className="proposal">
-              <div className="flex items-center justify-between gap-3">
-                <h4>Analysis proposal</h4>
-                <Badge variant="outline">
-                  {Math.round(f.confidence * 100)}% confidence
-                </Badge>
-              </div>
-              <p>{f.summary}</p>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  disabled={
-                    mutation.isPending ||
-                    f.review === "accepted" ||
-                    f.review === "applied"
-                  }
-                  onClick={() => mutation.mutate(true)}
-                >
-                  <CheckIcon data-icon="inline-start" />
-                  {f.review === "applied"
-                    ? "Applied"
-                    : f.review === "accepted"
-                      ? "Accepted"
-                      : "Accept"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    mutation.isPending ||
-                    f.review === "rejected" ||
-                    f.review === "applied"
-                  }
-                  onClick={() => mutation.mutate(false)}
-                >
-                  <XIcon data-icon="inline-start" />
-                  {f.review === "rejected" ? "Rejected" : "Reject"}
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {detail.model}
-                </span>
-              </div>
-              <ErrorNotice error={mutation.error} />
-            </section>
-          ) : f.skipReason ? (
-            <p className="text-muted-foreground">
-              Excluded from AI analysis: {f.skipReason}.
-            </p>
+          {detail.result ? (
+            <>
+              <ResultReview
+                key={`${detail.result.id}:${detail.result.revision}`}
+                result={detail.result}
+                binaryId={binaryId}
+              />
+              <ResultHistory
+                functionId={id}
+                binaryId={binaryId}
+                currentId={detail.result.id}
+              />
+            </>
           ) : (
-            <p className="text-muted-foreground">
-              No AI result yet. Run the pipeline after extraction.
+            <p>
+              {f.skipReason
+                ? `Excluded from background analysis: ${f.skipReason}.`
+                : "No analysis result yet. Select this function for an investigation."}
             </p>
           )}
           <Tabs defaultValue="code">

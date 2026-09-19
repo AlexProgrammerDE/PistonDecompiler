@@ -18,12 +18,13 @@ There is no guaranteed response time.
 
 - The server is a local, single-user tool. It binds to loopback and has no authentication.
 - Ghidra parses untrusted files in a subprocess under the current user's account. There is no sandbox.
-- The imported program is stored and analyzed, not executed by Piston.
+- The imported program is stored and analyzed, not executed by PistonDecompiler.
 - Binary strings, pseudocode, names, and model responses are untrusted input.
 - AI tools can read indexed evidence from the selected binary. They cannot run shell commands or mutate Ghidra.
 - Names and comments reach Ghidra only through accepted proposals and the single writer.
 - Provider keys stay in backend environment variables. They are not returned through the API.
 - AI requests transmit selected decompiled code and related evidence to the configured provider.
+- Pinned prompts and tool transcripts persist locally for audit and reproducibility. They can contain decompiled code and model output.
 - SQLite, exports, and Ghidra projects can contain sensitive source material. Protect the data directory.
 
 The server accepts only its configured loopback address or `localhost`, with the configured port, in the request authority.

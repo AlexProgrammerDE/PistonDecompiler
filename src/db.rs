@@ -23,9 +23,12 @@ impl Db {
             .connect_with(options)
             .await?;
         sqlx::migrate!().run(&pool).await?;
-        Ok(Self { pool })
+        let db = Self { pool };
+        crate::knowledge::backfill(&db).await?;
+        Ok(db)
     }
     pub async fn event(&self, binary: &str, level: &str, message: &str) -> Result<()> {
+        tracing::info!(binary, level, message, "Analysis event");
         sqlx::query("INSERT INTO events(binary_id,level,message) VALUES(?,?,?)")
             .bind(binary)
             .bind(level)
@@ -39,11 +42,7 @@ impl Db {
         let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Reservation retained.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET status='interrupted',error='Extraction was interrupted. Resume to extract again.' WHERE status='extracting'").execute(&mut *tx).await?;
-        // Applying the same accepted name and comment again is idempotent. A
-        // stopped process cannot know whether Ghidra committed before exit.
-        sqlx::query("UPDATE results SET review='accepted' WHERE review='applying'")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query("UPDATE apply_operations SET status='uncertain',error='Process stopped during writeback. Retry this exact change set to reconcile.' WHERE status='applying'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET paused=1 WHERE id IN (SELECT binary_id FROM jobs WHERE status='uncertain')").execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
@@ -104,12 +103,13 @@ impl Db {
             "skipped" => "f.skip_reason<>''",
             "review" => "r.review='pending'",
             "accepted" => "r.review='accepted'",
+            "stale" => "r.stale=1",
             _ => anyhow::bail!("unknown function filter"),
         };
         let where_sql = format!(
             "f.binary_id=? AND ({filter}) AND (?='' OR f.id IN (SELECT function_id FROM function_search WHERE function_search MATCH ?))"
         );
-        let join = "FROM functions f LEFT JOIN results r ON r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)";
+        let join = "FROM functions f LEFT JOIN results r ON r.id=f.current_result_id";
         let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) {join} WHERE {where_sql}"))
             .bind(&query.binary_id)
             .bind(search)
@@ -132,7 +132,7 @@ impl Db {
         })
     }
     pub async fn function(&self, id: &str) -> Result<proto::FunctionDetail> {
-        let row = sqlx::query(&format!("{FUNCTION_SELECT},f.pseudocode,f.strings_json,f.imports_json,f.disassembly,f.pcode,COALESCE(r.raw_json,'') AS analysis_json,COALESCE(r.model,'') AS model,COALESCE(r.prompt_hash,'') AS prompt_hash FROM functions f LEFT JOIN results r ON r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1) WHERE f.id=?"))
+        let row = sqlx::query(&format!("{FUNCTION_SELECT},f.pseudocode,f.strings_json,f.imports_json,f.disassembly,f.pcode,COALESCE(r.raw_json,'') AS analysis_json,COALESCE(r.model,'') AS model,COALESCE(r.prompt_hash,'') AS prompt_hash FROM functions f LEFT JOIN results r ON r.id=f.current_result_id WHERE f.id=?"))
             .bind(id).fetch_one(&self.pool).await?;
         let mut detail = proto::FunctionDetail {
             function: Some(function_row(&row)),
@@ -152,16 +152,21 @@ impl Db {
             } else {
                 "f.id IN (SELECT callee FROM edges WHERE caller=?)"
             };
-            let rows = sqlx::query(&format!("{FUNCTION_SELECT} FROM functions f LEFT JOIN results r ON r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY created_at DESC LIMIT 1) WHERE {condition} ORDER BY f.address LIMIT 100"))
+            let rows = sqlx::query(&format!("{FUNCTION_SELECT} FROM functions f LEFT JOIN results r ON r.id=f.current_result_id WHERE {condition} ORDER BY f.address LIMIT 100"))
                 .bind(id).fetch_all(&self.pool).await?;
             *target = rows.iter().map(function_row).collect();
+        }
+        if let Some(f) = &detail.function
+            && !f.result_id.is_empty()
+        {
+            detail.result = Some(crate::knowledge::result(self, &f.result_id).await?);
         }
         Ok(detail)
     }
     pub async fn overview(&self, id: &str) -> Result<proto::Overview> {
         let binary = self.binary(id).await?;
         let b =
-            sqlx::query("SELECT spent_usd,reserved_usd,budget_usd,paused FROM binaries WHERE id=?")
+            sqlx::query("SELECT spent_usd,reserved_usd,budget_usd,paused,active_run_id FROM binaries WHERE id=?")
                 .bind(id)
                 .fetch_one(&self.pool)
                 .await?;
@@ -173,7 +178,7 @@ impl Db {
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
-        let proposals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='pending' AND r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)").bind(id).fetch_one(&self.pool).await?;
+        let proposals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='pending' AND r.id=f.current_result_id").bind(id).fetch_one(&self.pool).await?;
         let rows = sqlx::query(
             "SELECT stage,status,COUNT(*) AS n FROM jobs WHERE binary_id=? GROUP BY stage,status",
         )
@@ -194,6 +199,9 @@ impl Db {
             reserved_usd: b.get("reserved_usd"),
             budget_usd: b.get("budget_usd"),
             paused: b.get("paused"),
+            active_run_id: b
+                .get::<Option<String>, _>("active_run_id")
+                .unwrap_or_default(),
             ..Default::default()
         };
         for stage in ["map", "propagate", "escalate"] {
@@ -249,7 +257,7 @@ fn binary_row(r: &sqlx::sqlite::SqliteRow) -> proto::Binary {
         error: r.get("error"),
     }
 }
-const FUNCTION_SELECT: &str = "SELECT f.id,f.address,f.name,f.size,f.skip_reason,f.module,(SELECT COUNT(*) FROM edges WHERE callee=f.id) AS callers,(SELECT COUNT(*) FROM edges WHERE caller=f.id) AS callees,COALESCE(r.summary,'') AS summary,COALESCE(r.proposed_name,'') AS proposed_name,COALESCE(r.confidence,0.0) AS confidence,COALESCE(r.review,'') AS review,COALESCE((SELECT status FROM jobs WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1),'indexed') AS status";
+const FUNCTION_SELECT: &str = "SELECT f.id,f.address,f.name,f.size,f.skip_reason,f.module,(SELECT COUNT(*) FROM edges WHERE callee=f.id) AS callers,(SELECT COUNT(*) FROM edges WHERE caller=f.id) AS callees,COALESCE(r.id,'') AS result_id,COALESCE(r.stale,0) AS stale,COALESCE(r.summary,'') AS summary,COALESCE(r.proposed_name,'') AS proposed_name,COALESCE(r.confidence,0.0) AS confidence,COALESCE(r.review,'') AS review,COALESCE((SELECT status FROM jobs WHERE function_id=f.id ORDER BY rowid DESC LIMIT 1),'indexed') AS status";
 fn function_row(r: &sqlx::sqlite::SqliteRow) -> proto::Function {
     proto::Function {
         id: r.get("id"),
@@ -265,5 +273,7 @@ fn function_row(r: &sqlx::sqlite::SqliteRow) -> proto::Function {
         module: r.get("module"),
         review: r.get("review"),
         status: r.get("status"),
+        result_id: r.get("result_id"),
+        stale: r.get("stale"),
     }
 }

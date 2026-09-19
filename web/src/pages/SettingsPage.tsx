@@ -51,10 +51,10 @@ export function SettingsPage() {
         <section className="settings-section">
           <h2>Configure the backend</h2>
           <p>
-            Copy <code>piston.example.toml</code> to <code>piston.toml</code>.
-            Enter your provider, models, and current prices. Set the API key in
-            the environment variable named by <code>ai.api_key_env</code>, then
-            restart Piston.
+            Copy <code>pistondecompiler.example.toml</code> to{" "}
+            <code>pistondecompiler.toml</code>. Enter your provider, models, and
+            current prices. Set the API key in the environment variable named by{" "}
+            <code>ai.api_key_env</code>, then restart PistonDecompiler.
           </p>
           <p>
             API keys stay on the backend. Existing binary budgets remain fixed.

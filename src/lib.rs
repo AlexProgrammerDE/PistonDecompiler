@@ -4,6 +4,8 @@ pub mod config;
 pub mod db;
 pub mod ghidra;
 pub mod graph;
+pub mod knowledge;
+pub mod live;
 pub mod pipeline;
 pub mod server;
 mod snapshot;

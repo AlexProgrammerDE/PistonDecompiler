@@ -1,5 +1,5 @@
 // Export an analyzed program into streaming JSON Lines.
-// @category Piston
+// @category PistonDecompiler
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.program.model.listing.*;
@@ -14,6 +14,13 @@ public class PistonExport extends GhidraScript {
     @Override public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length != 1) throw new IllegalArgumentException("Expected export path");
+        Map<String,Object> metadata = new LinkedHashMap<>();
+        metadata.put("ghidra_version", ghidra.framework.Application.getApplicationVersion());
+        metadata.put("exporter_version", "pistondecompiler-export-v2");
+        metadata.put("language", currentProgram.getLanguageID().toString());
+        metadata.put("compiler", currentProgram.getCompilerSpec().getCompilerSpecID().toString());
+        metadata.put("decompiler_timeout_seconds", 60);
+        Files.writeString(Path.of(args[0].replaceFirst("\\.[^.]+$", "") + ".metadata.json"), new Gson().toJson(metadata), StandardCharsets.UTF_8);
         DecompInterface decompiler = new DecompInterface();
         if (!decompiler.openProgram(currentProgram)) throw new IllegalStateException("Cannot open decompiler");
         Gson gson = new Gson();
@@ -24,6 +31,7 @@ public class PistonExport extends GhidraScript {
                 Map<String,Object> row = new LinkedHashMap<>();
                 row.put("address", function.getEntryPoint().toString());
                 row.put("name", function.getName());
+                row.put("comment", Objects.toString(function.getComment(), ""));
                 row.put("size", function.getBody().getNumAddresses());
                 row.put("thunk", function.isThunk());
                 row.put("external", function.isExternal());

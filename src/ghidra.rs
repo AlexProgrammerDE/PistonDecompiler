@@ -18,6 +18,7 @@ pub struct ExportFunction {
     pub address: String,
     pub name: String,
     pub size: i64,
+    pub comment: String,
     pub pseudocode: String,
     pub disassembly: String,
     pub pcode: String,
@@ -74,7 +75,7 @@ async fn headless(
     let home = config
         .ghidra_home
         .as_ref()
-        .context("Set GHIDRA_HOME or ghidra_home in piston.toml")?;
+        .context("Set GHIDRA_HOME or ghidra_home in pistondecompiler.toml")?;
     let executable = home.join("support/analyzeHeadless");
     ensure!(
         executable.is_file(),
@@ -198,6 +199,14 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         .fetch_one(&mut *tx)
         .await?;
     ensure!(existing == 0, "binary already has indexed functions");
+    let metadata_path = path.with_extension("metadata.json");
+    let metadata = tokio::fs::read_to_string(metadata_path)
+        .await
+        .unwrap_or_else(|_| {
+            r#"{"source":"imported JSONL","ghidra_version":"unknown","exporter_version":"unknown"}"#
+                .into()
+        });
+    let _: serde_json::Value = serde_json::from_str(&metadata)?;
     let mut addresses = HashMap::new();
     let mut pending_edges = Vec::new();
     let mut fingerprints = HashSet::new();
@@ -236,6 +245,11 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         .bind(&f.pseudocode)
         .execute(&mut *tx)
         .await?;
+        sqlx::query("UPDATE functions SET comment=? WHERE id=?")
+            .bind(&f.comment)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
         for callee in f.callees {
             pending_edges.push((id.clone(), callee));
         }
@@ -255,8 +269,12 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
     }
     let mut ids: Vec<_> = addresses.into_values().collect();
     ids.sort();
-    let ranks = graph::dependency_ranks(&ids, &edges);
-    let modules = graph::modules(&ids, &edges);
+    let (ids, edges, ranks, modules) = tokio::task::spawn_blocking(move || {
+        let ranks = graph::dependency_ranks(&ids, &edges);
+        let modules = graph::modules(&ids, &edges);
+        (ids, edges, ranks, modules)
+    })
+    .await?;
     for id in &ids {
         sqlx::query("UPDATE functions SET module=? WHERE id=?")
             .bind(&modules[id])
@@ -266,6 +284,7 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         sqlx::query("INSERT INTO jobs(id,binary_id,function_id,stage,priority) SELECT ?,?,id,'map',? FROM functions WHERE id=? AND skip_reason=''")
             .bind(uuid::Uuid::new_v4().to_string()).bind(binary).bind(-(ranks[id] as i64)).bind(id).execute(&mut *tx).await?;
     }
+    crate::knowledge::snapshot(&mut tx, binary, &metadata).await?;
     sqlx::query("UPDATE binaries SET status='indexed',error='' WHERE id=?")
         .bind(binary)
         .execute(&mut *tx)
@@ -283,83 +302,61 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
     .await?;
     Ok(())
 }
-pub async fn apply(db: &Db, config: &Config, binary: &str) -> Result<usize> {
-    apply_inner(db, config, binary, None).await
-}
-pub async fn apply_cancellable(
+pub async fn execute_apply(
     db: &Db,
     config: &Config,
-    binary: &str,
-    cancel: CancellationToken,
-) -> Result<usize> {
-    apply_inner(db, config, binary, Some(cancel)).await
-}
-async fn apply_inner(
-    db: &Db,
-    config: &Config,
-    binary: &str,
+    operation_id: &str,
     cancel: Option<CancellationToken>,
-) -> Result<usize> {
+) -> Result<crate::proto::ApplyOperation> {
     let mut tx = db.pool.begin().await?;
-    let rows = sqlx::query("SELECT r.id,f.address,r.proposed_name,r.summary FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='accepted' AND r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)").bind(binary).fetch_all(&mut *tx).await?;
-    if rows.is_empty() {
-        tx.rollback().await?;
-        return Ok(0);
-    }
-    for row in &rows {
-        let changed =
-            sqlx::query("UPDATE results SET review='applying' WHERE id=? AND review='accepted'")
-                .bind(row.get::<String, _>("id"))
-                .execute(&mut *tx)
-                .await?
-                .rows_affected();
-        ensure!(changed == 1, "proposal review changed before writeback");
-    }
+    let changed=sqlx::query("UPDATE apply_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain') AND NOT EXISTS(SELECT 1 FROM apply_operations other WHERE other.binary_id=apply_operations.binary_id AND other.id<>apply_operations.id AND other.status IN ('applying','uncertain'))").bind(operation_id).execute(&mut *tx).await?.rows_affected();
+    ensure!(
+        changed == 1,
+        "Change set is already applied or another unresolved writer owns this binary"
+    );
+    let invalid:i64=sqlx::query_scalar("SELECT COUNT(*) FROM apply_items i JOIN results r ON r.id=i.result_id WHERE i.operation_id=? AND (r.revision<>i.revision OR r.stale=1)").bind(operation_id).fetch_one(&mut *tx).await?;
+    ensure!(
+        invalid == 0,
+        "Reviewed results changed or became stale. Create a new preview."
+    );
     tx.commit().await?;
-    let proposals: Vec<_> = rows.iter().map(|r| serde_json::json!({"address":r.get::<String,_>("address"),"name":r.get::<String,_>("proposed_name"),"summary":r.get::<String,_>("summary")})).collect();
-    let folder = tokio::fs::canonicalize(config.data_dir.join("binaries").join(binary)).await?;
-    let path = folder.join("accepted.json");
-    tokio::fs::write(&path, serde_json::to_vec_pretty(&proposals)?).await?;
-    let result = headless(
-        config,
-        binary,
-        &[
-            "-process".into(),
-            "program.bin".into(),
-            "-noanalysis".into(),
-            "-postScript".into(),
-            "PistonApply.java".into(),
-            path.to_string_lossy().into_owned(),
-        ],
-        cancel,
-    )
-    .await;
-    if let Err(error) = result {
-        let mut tx = db.pool.begin().await?;
-        for row in &rows {
-            sqlx::query("UPDATE results SET review='accepted' WHERE id=? AND review='applying'")
-                .bind(row.get::<String, _>("id"))
-                .execute(&mut *tx)
-                .await?;
+    let operation = crate::knowledge::apply_operation(db, operation_id).await?;
+    let result=async {
+        let folder=tokio::fs::canonicalize(config.data_dir.join("binaries").join(&operation.binary_id)).await?;
+        let path=folder.join(format!("apply-{operation_id}.json"));
+        let report=folder.join(format!("apply-{operation_id}-report.json"));
+        tokio::fs::write(&path,serde_json::to_vec(&operation.items)?).await?;
+        if report.exists(){tokio::fs::remove_file(&report).await?;}
+        headless(config,&operation.binary_id,&["-process".into(),"program.bin".into(),"-noanalysis".into(),"-postScript".into(),"PistonApply.java".into(),path.to_string_lossy().into_owned(),report.to_string_lossy().into_owned()],cancel).await?;
+        let outcomes:Vec<crate::proto::ApplyItem>=serde_json::from_slice(&tokio::fs::read(report).await?)?;
+        ensure!(outcomes.len()==operation.items.len(),"Ghidra returned an incomplete report");
+        let mut seen=HashSet::new();
+        let mut tx=db.pool.begin().await?;
+        for item in &outcomes {
+            let expected=operation.items.iter().find(|i|i.result_id==item.result_id).context("Unknown result in Ghidra report")?;
+            ensure!(seen.insert(&item.result_id)&&item.address==expected.address&&item.name==expected.name&&item.summary==expected.summary&&["applied","conflict"].contains(&item.status.as_str()),"Invalid Ghidra outcome");
+            sqlx::query("UPDATE apply_items SET status=?,error=? WHERE operation_id=? AND result_id=?").bind(&item.status).bind(&item.error).bind(operation_id).bind(&item.result_id).execute(&mut *tx).await?;
+            if item.status=="applied" {sqlx::query("UPDATE functions SET name=?,comment=? WHERE id=(SELECT function_id FROM results WHERE id=?)").bind(&item.name).bind(&item.summary).bind(&item.result_id).execute(&mut *tx).await?;}
         }
-        tx.commit().await?;
+        let status=if outcomes.iter().any(|i|i.status=="conflict"){"conflict"}else{"applied"};
+        sqlx::query("UPDATE apply_operations SET status=? WHERE id=?").bind(status).bind(operation_id).execute(&mut *tx).await?;
+        tx.commit().await?;anyhow::Ok(())
+    }.await;
+    if let Err(error) = result {
+        sqlx::query("UPDATE apply_operations SET status='uncertain',error=? WHERE id=?")
+            .bind(format!("{error:#}"))
+            .bind(operation_id)
+            .execute(&db.pool)
+            .await?;
         return Err(error);
     }
-    let mut tx = db.pool.begin().await?;
-    for row in &rows {
-        sqlx::query("UPDATE results SET review='applied' WHERE id=? AND review='applying'")
-            .bind(row.get::<String, _>("id"))
-            .execute(&mut *tx)
-            .await?;
-    }
-    tx.commit().await?;
     db.event(
-        binary,
+        &operation.binary_id,
         "info",
-        &format!("Applied {} reviewed proposals in Ghidra.", rows.len()),
+        &format!("Ghidra change set {operation_id} finished. Inspect item outcomes."),
     )
     .await?;
-    Ok(rows.len())
+    crate::knowledge::apply_operation(db, operation_id).await
 }
 
 #[cfg(all(test, unix))]

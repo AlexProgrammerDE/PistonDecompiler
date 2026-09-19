@@ -1,4 +1,7 @@
-import { lazy, Suspense, useCallback, useState } from "react"
+import { InvestigationWorkbench } from "@/components/InvestigationWorkbench"
+import { ApplyChanges } from "@/components/ApplyChanges"
+import { LiveAnalysis, useLiveAnalysis } from "@/components/LiveAnalysis"
+import { lazy, Suspense, useCallback } from "react"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
@@ -6,7 +9,6 @@ import {
   PauseIcon,
   ArrowClockwiseIcon,
   DownloadSimpleIcon,
-  CheckSquareIcon,
 } from "@phosphor-icons/react"
 import {
   api,
@@ -32,21 +34,31 @@ import {
   TableBody,
 } from "@/components/ui/table"
 const UsageChart = lazy(() => import("@/components/UsageChart"))
-export type BinaryView = "functions" | "pipeline" | "usage" | "events"
+export type BinaryView =
+  "functions" | "pipeline" | "usage" | "events" | "investigations" | "live"
 const views: { id: BinaryView; label: string }[] = [
   { id: "functions", label: "Functions" },
+  { id: "investigations", label: "Investigations" },
+  { id: "live", label: "Live graph" },
   { id: "pipeline", label: "Pipeline" },
   { id: "usage", label: "Usage & cost" },
   { id: "events", label: "Events" },
 ]
 export function BinaryPage() {
   const { binaryId } = useParams({ from: "/binaries/$binaryId" })
-  const { view } = useSearch({ from: "/binaries/$binaryId" })
+  const { view, functionId: selected = "" } = useSearch({
+    from: "/binaries/$binaryId",
+  })
   const navigate = useNavigate({ from: "/binaries/$binaryId" })
   const query = useQuery(overviewQuery(binaryId))
   const settings = useQuery(settingsQuery)
-  const [selected, setSelected] = useState("")
-  const onSelect = useCallback((id: string) => setSelected(id), [])
+  const connected = useLiveAnalysis(binaryId)
+  const onSelect = useCallback(
+    (id: string) => {
+      void navigate({ search: { view: "functions", functionId: id } })
+    },
+    [navigate]
+  )
   const mutation = useMutation({
     mutationFn: (action: string) => api.controlPipeline({ binaryId, action }),
     onSuccess: () => invalidateBinary(binaryId),
@@ -63,6 +75,11 @@ export function BinaryPage() {
             <h1>{b?.name ?? "Binary analysis"}</h1>
             {b ? <Badge variant="outline">{b.status}</Badge> : null}
           </div>
+          <p aria-live="polite">
+            {connected
+              ? "Live updates connected"
+              : "Connecting to live updates…"}
+          </p>
           <p>
             {b
               ? `${b.format} · ${b.architecture} · ${bytes(b.size)}`
@@ -84,7 +101,7 @@ export function BinaryPage() {
             disabled={
               mutation.isPending ||
               !o ||
-              o.eligible === 0 ||
+              o.functions === 0 ||
               !settings.data?.aiConfigured
             }
             onClick={() => mutation.mutate(o?.paused ? "resume" : "pause")}
@@ -98,6 +115,21 @@ export function BinaryPage() {
           </Button>
         </div>
       </header>
+      {o?.activeRunId ? (
+        <div className="page-body">
+          <p>
+            Analysis is scoped to the latest investigation or selection. Other
+            queued work is held.
+          </p>
+          <Button
+            variant="outline"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate("all")}
+          >
+            Include all queued work
+          </Button>
+        </div>
+      ) : null}
       <div className="summary-strip">
         <div>
           <span>Functions</span>
@@ -109,7 +141,7 @@ export function BinaryPage() {
           <span>Analyzed</span>
           <strong>
             {o ? (
-              `${count(o.analyzed)} / ${count(o.eligible)}`
+              `${count(o.analyzed)} / ${count(o.functions)}`
             ) : (
               <Skeleton className="h-6 w-16" />
             )}
@@ -149,11 +181,11 @@ export function BinaryPage() {
             key={v.id}
             to="/binaries/$binaryId"
             params={{ binaryId }}
-            search={{ view: v.id }}
+            search={{ view: v.id, functionId: selected }}
             className={view === v.id ? "view-tab selected" : "view-tab"}
             onClick={(e) => {
               e.preventDefault()
-              void navigate({ search: { view: v.id } })
+              void navigate({ search: { view: v.id, functionId: selected } })
             }}
           >
             {v.label}
@@ -188,16 +220,6 @@ export function BinaryPage() {
                 <ArrowClockwiseIcon data-icon="inline-start" />
                 Retry failed jobs
               </Button>
-              <Button
-                variant="outline"
-                disabled={
-                  mutation.isPending || !settings.data?.ghidraConfigured
-                }
-                onClick={() => mutation.mutate("apply")}
-              >
-                <CheckSquareIcon data-icon="inline-start" />
-                Apply accepted proposals
-              </Button>
             </div>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -227,6 +249,7 @@ export function BinaryPage() {
             </TableBody>
           </Table>
           <Jobs binaryId={binaryId} />
+          <ApplyChanges binaryId={binaryId} />
         </div>
       ) : null}
       {view === "usage" ? (
@@ -334,6 +357,20 @@ export function BinaryPage() {
               />
             ) : null}
           </section>
+        </div>
+      ) : null}
+      {view === "investigations" ? (
+        <div className="page-body">
+          <InvestigationWorkbench
+            binaryId={binaryId}
+            selected={selected}
+            onSelect={onSelect}
+          />
+        </div>
+      ) : null}
+      {view === "live" ? (
+        <div className="page-body">
+          <LiveAnalysis binaryId={binaryId} onSelect={onSelect} />
         </div>
       ) : null}
       {view === "events" ? <Events binaryId={binaryId} /> : null}

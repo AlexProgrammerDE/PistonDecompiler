@@ -162,7 +162,7 @@ impl PistonService for Service {
         r: Request<proto::ControlRequest>,
     ) -> Result<Response<proto::Empty>, Status> {
         let r = r.into_inner();
-        if r.action == "extract" || r.action == "apply" {
+        if r.action == "extract" {
             self.db.binary(&r.binary_id).await.map_err(status)?;
             if self.config.ghidra_home.is_none() {
                 return Err(Status::failed_precondition("Configure GHIDRA_HOME first"));
@@ -173,24 +173,13 @@ impl PistonService for Service {
             let service = self.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let result = if r.action == "extract" {
-                    ghidra::extract_cancellable(
-                        &service.db,
-                        &service.config,
-                        &r.binary_id,
-                        service.shutdown.clone(),
-                    )
-                    .await
-                } else {
-                    ghidra::apply_cancellable(
-                        &service.db,
-                        &service.config,
-                        &r.binary_id,
-                        service.shutdown.clone(),
-                    )
-                    .await
-                    .map(|_| ())
-                };
+                let result = ghidra::extract_cancellable(
+                    &service.db,
+                    &service.config,
+                    &r.binary_id,
+                    service.shutdown.clone(),
+                )
+                .await;
                 if let Err(error) = result {
                     let _ = service
                         .db
@@ -214,10 +203,133 @@ impl PistonService for Service {
         r: Request<proto::ReviewRequest>,
     ) -> Result<Response<proto::Empty>, Status> {
         let r = r.into_inner();
-        pipeline::review(&self.db, &r.function_id, r.accept)
-            .await
-            .map_err(status)?;
+        pipeline::review(&self.db, &r).await.map_err(status)?;
         Ok(Response::new(proto::Empty {}))
+    }
+    async fn get_graph(
+        &self,
+        r: Request<proto::BinaryRequest>,
+    ) -> Result<Response<proto::Graph>, Status> {
+        Ok(Response::new(
+            crate::live::graph(&self.db, &r.into_inner().binary_id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn get_result(
+        &self,
+        r: Request<proto::ArtifactRequest>,
+    ) -> Result<Response<proto::AnalysisResult>, Status> {
+        Ok(Response::new(
+            crate::knowledge::result(&self.db, &r.into_inner().id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn list_results(
+        &self,
+        r: Request<proto::FunctionRequest>,
+    ) -> Result<Response<proto::ResultList>, Status> {
+        Ok(Response::new(
+            crate::knowledge::history(&self.db, &r.into_inner().id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn get_artifact(
+        &self,
+        r: Request<proto::ArtifactRequest>,
+    ) -> Result<Response<proto::Artifact>, Status> {
+        Ok(Response::new(
+            crate::knowledge::artifact(&self.db, &r.into_inner().id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn correct_result(
+        &self,
+        r: Request<proto::CorrectionRequest>,
+    ) -> Result<Response<proto::AnalysisResult>, Status> {
+        Ok(Response::new(
+            crate::knowledge::correct(&self.db, &r.into_inner())
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn reanalyze(
+        &self,
+        r: Request<proto::ReanalysisRequest>,
+    ) -> Result<Response<proto::RunResponse>, Status> {
+        Ok(Response::new(
+            crate::knowledge::reanalyze(&self.db, &self.config.ai, &r.into_inner())
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn list_investigations(
+        &self,
+        r: Request<proto::BinaryRequest>,
+    ) -> Result<Response<proto::InvestigationList>, Status> {
+        Ok(Response::new(
+            crate::knowledge::investigations(&self.db, &r.into_inner().binary_id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn save_investigation(
+        &self,
+        r: Request<proto::Investigation>,
+    ) -> Result<Response<proto::Investigation>, Status> {
+        Ok(Response::new(
+            crate::knowledge::save_investigation(&self.db, &r.into_inner())
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn preview_apply(
+        &self,
+        r: Request<proto::BinaryRequest>,
+    ) -> Result<Response<proto::ApplyOperation>, Status> {
+        Ok(Response::new(
+            crate::knowledge::preview_apply(&self.db, &r.into_inner().binary_id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn list_apply_operations(
+        &self,
+        r: Request<proto::BinaryRequest>,
+    ) -> Result<Response<proto::ApplyOperationList>, Status> {
+        let ids:Vec<String>=sqlx::query_scalar("SELECT id FROM apply_operations WHERE binary_id=? ORDER BY created_at DESC,rowid DESC LIMIT 20").bind(r.into_inner().binary_id).fetch_all(&self.db.pool).await.map_err(|e|status(e.into()))?;
+        let mut operations = Vec::new();
+        for id in ids {
+            operations.push(
+                crate::knowledge::apply_operation(&self.db, &id)
+                    .await
+                    .map_err(status)?,
+            );
+        }
+        Ok(Response::new(proto::ApplyOperationList { operations }))
+    }
+    async fn execute_apply(
+        &self,
+        r: Request<proto::ApplyRequest>,
+    ) -> Result<Response<proto::ApplyOperation>, Status> {
+        let _permit = self
+            .ghidra_gate
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Status::resource_exhausted("Ghidra is busy"))?;
+        Ok(Response::new(
+            ghidra::execute_apply(
+                &self.db,
+                &self.config,
+                &r.into_inner().id,
+                Some(self.shutdown.clone()),
+            )
+            .await
+            .map_err(status)?,
+        ))
     }
     async fn get_settings(
         &self,
@@ -244,7 +356,7 @@ impl PistonService for Service {
 pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Router> {
     ensure!(
         addr.ip().is_loopback(),
-        "Piston currently supports loopback access only. Use an authenticated SSH tunnel for remote access."
+        "PistonDecompiler currently supports loopback access only. Use an authenticated SSH tunnel for remote access."
     );
     let rpc = PistonServiceServer::new(service.clone())
         .max_decoding_message_size(128 * 1024 * 1024)
@@ -256,6 +368,10 @@ pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Rout
         .route(
             "/healthz",
             axum::routing::get(|| async { axum::http::StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/events/{binary}",
+            axum::routing::get(crate::live::events).with_state(service.clone()),
         )
         .fallback_service(
             tower_http::services::ServeDir::new(&service.config.web_dir).not_found_service(
@@ -272,7 +388,7 @@ pub async fn serve(service: Service) -> Result<()> {
     let addr: std::net::SocketAddr = service.config.listen.parse()?;
     let router = router(service.clone(), addr)?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr,"Piston gRPC-Web and frontend ready");
+    tracing::info!(%addr,"PistonDecompiler gRPC-Web and frontend ready");
     let cancel = service.shutdown.clone();
     let worker = if service.config.ai.configured() {
         Some(tokio::spawn(pipeline::work(

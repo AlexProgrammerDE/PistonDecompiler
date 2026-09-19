@@ -1,0 +1,20 @@
+{
+  "question": "How does the program load configuration and handle duplicate or invalid entries?",
+  "required_findings": [
+    "Opens the path supplied as the first command-line argument for reading",
+    "Reads at most 255 characters per iteration",
+    "Splits entries at the first equals sign",
+    "Recognizes port and verbose keys",
+    "Later recognized entries overwrite earlier settings",
+    "Rejects ports above 65535 and nonnumeric suffixes other than newline",
+    "Returns failure when the file cannot be opened or a port is invalid",
+    "Closes the file after success and invalid-port failure"
+  ],
+  "unsupported_claims_to_watch": [
+    "Uses a JSON parser",
+    "Encrypts configuration",
+    "Rejects all unknown keys",
+    "Rejects all overlong lines rather than reading fragments"
+  ],
+  "scoring": "Record supported findings, unsupported claims, unresolved findings, elapsed time, review corrections, and accounted cost. Do not score exact recovered names."
+}

@@ -1,7 +1,6 @@
 import { Link, Outlet } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
-  CpuIcon,
   FolderOpenIcon,
   GearSixIcon,
   PlusIcon,
@@ -27,8 +26,8 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <Link to="/" className="brand">
-          <CpuIcon size={24} weight="duotone" />
-          <span>Piston</span>
+          <img src="/pistondecompiler.svg" alt="" width={28} height={28} />
+          <span>PistonDecompiler</span>
         </Link>
         <nav aria-label="Workspace">
           <Link to="/" activeOptions={{ exact: true }} className="nav-link">

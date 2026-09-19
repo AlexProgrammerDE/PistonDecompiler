@@ -20,8 +20,8 @@ exclude:
   - Cargo.lock
   - build.rs
   - rust-toolchain.toml
-  - piston.example.toml
-  - piston.toml
+  - pistondecompiler.example.toml
+  - pistondecompiler.toml
   - package.json
   - bun.lock
   - AGENTS.md

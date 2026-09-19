@@ -44,8 +44,12 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         let Some(job) = pipeline::claim_batch(db, ai, binary, &id).await? else {
             break;
         };
-        match ai.prompt(db, &job.function_id, "map").await {
+        match ai.pin_prompt(db, &job).await {
             Ok(prompt) => {
+                if serde_json::to_value(&prompt.config)? != serde_json::to_value(&ai.config)? {
+                    pipeline::fail_before_dispatch(db,ai,&job,"Pinned provider settings differ from this batch. Use the original configuration or a new run.").await?;
+                    continue;
+                }
                 lines.push_str(&serde_json::to_string(&json!({"custom_id":job.id,"method":"POST","url":"/v1/chat/completions","body":ai.body(&prompt.messages,"map",false)}))?);
                 lines.push('\n');
                 manifest.hashes.insert(job.id.clone(), prompt.hash);
@@ -246,6 +250,10 @@ pub async fn collect(db: &Db, ai: &Ai, id: &str) -> Result<String> {
     }
     let jobs = sqlx::query_as::<_,Job>("SELECT id,binary_id,function_id,stage,attempts,reserved_usd FROM jobs WHERE batch_id=? AND status='batched'").bind(id).fetch_all(&db.pool).await?;
     for job in jobs {
+        let pinned_input: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
+            .bind(&job.id)
+            .fetch_one(&db.pool)
+            .await?;
         let result = (|| -> Result<Completion> {
             let item = results
                 .get(&job.id)
@@ -264,6 +272,9 @@ pub async fn collect(db: &Db, ai: &Ai, id: &str) -> Result<String> {
                     .context("batch returned no content")?,
             )?;
             analysis.validate()?;
+            if !pinned_input.is_empty() {
+                Ai::validate_evidence(&analysis, &serde_json::from_str(&pinned_input)?)?;
+            }
             Ok(Completion {
                 analysis,
                 input_tokens: input,

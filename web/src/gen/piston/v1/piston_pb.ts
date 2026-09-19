@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file piston/v1/piston.proto.
  */
 export const file_piston_v1_piston: GenFile = /*@__PURE__*/
-  fileDesc("ChZwaXN0b24vdjEvcGlzdG9uLnByb3RvEglwaXN0b24udjEiBwoFRW1wdHkiIgoNQmluYXJ5UmVxdWVzdBIRCgliaW5hcnlfaWQYASABKAkimQEKBkJpbmFyeRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg4KBnNoYTI1NhgDIAEoCRIMCgRzaXplGAQgASgEEhQKDGFyY2hpdGVjdHVyZRgFIAEoCRIOCgZmb3JtYXQYBiABKAkSDgoGc3RhdHVzGAcgASgJEhIKCmNyZWF0ZWRfYXQYCCABKAMSDQoFZXJyb3IYCSABKAkiMQoKQmluYXJ5TGlzdBIjCghiaW5hcmllcxgBIAMoCzIRLnBpc3Rvbi52MS5CaW5hcnkiPAoNSW1wb3J0UmVxdWVzdBIMCgRwYXRoGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHY29udGVudBgDIAEoDCLEAwoIT3ZlcnZpZXcSIQoGYmluYXJ5GAEgASgLMhEucGlzdG9uLnYxLkJpbmFyeRIRCglmdW5jdGlvbnMYAiABKA0SEAoIZWxpZ2libGUYAyABKA0SEAoIYW5hbHl6ZWQYBCABKA0SDgoGcXVldWVkGAUgASgNEg8KB3J1bm5pbmcYBiABKA0SDgoGZmFpbGVkGAcgASgNEhEKCXByb3Bvc2FscxgIIAEoDRIUCgxpbnB1dF90b2tlbnMYCSABKAQSFQoNb3V0cHV0X3Rva2VucxgKIAEoBBIQCghjb3N0X3VzZBgLIAEoARIUCgxyZXNlcnZlZF91c2QYDCABKAESEgoKYnVkZ2V0X3VzZBgNIAEoARINCgVlZGdlcxgOIAEoDRIPCgdtb2R1bGVzGA8gASgNEiQKBXVzYWdlGBAgAygLMhUucGlzdG9uLnYxLlVzYWdlUG9pbnQSIAoGc3RhZ2VzGBEgAygLMhAucGlzdG9uLnYxLlN0YWdlEg4KBnBhdXNlZBgSIAEoCBI5ChNwcm92aWRlcl9icmVha2Rvd25zGBMgAygLMhwucGlzdG9uLnYxLlByb3ZpZGVyQnJlYWtkb3duIm0KClVzYWdlUG9pbnQSDgoGYnVja2V0GAEgASgJEhQKDGlucHV0X3Rva2VucxgCIAEoBBIVCg1vdXRwdXRfdG9rZW5zGAMgASgEEhAKCGNvc3RfdXNkGAQgASgBEhAKCHJlcXVlc3RzGAUgASgNIlkKBVN0YWdlEgwKBG5hbWUYASABKAkSDgoGcXVldWVkGAIgASgNEhEKCWNvbXBsZXRlZBgDIAEoDRIOCgZmYWlsZWQYBCABKA0SDwoHcnVubmluZxgFIAEoDSKeAQoRUHJvdmlkZXJCcmVha2Rvd24SDQoFbW9kZWwYASABKAkSDQoFc3RhZ2UYAiABKAkSEAoIcmVxdWVzdHMYAyABKA0SFAoMaW5wdXRfdG9rZW5zGAQgASgEEhUKDW91dHB1dF90b2tlbnMYBSABKAQSEAoIY29zdF91c2QYBiABKAESGgoSYXZlcmFnZV9sYXRlbmN5X21zGAcgASgBImEKDUZ1bmN0aW9uUXVlcnkSEQoJYmluYXJ5X2lkGAEgASgJEg4KBnNlYXJjaBgCIAEoCRIOCgZvZmZzZXQYAyABKA0SDQoFbGltaXQYBCABKA0SDgoGZmlsdGVyGAUgASgJIuYBCghGdW5jdGlvbhIKCgJpZBgBIAEoCRIPCgdhZGRyZXNzGAIgASgJEgwKBG5hbWUYAyABKAkSDAoEc2l6ZRgEIAEoBBIPCgdjYWxsZXJzGAUgASgNEg8KB2NhbGxlZXMYBiABKA0SEwoLc2tpcF9yZWFzb24YByABKAkSDwoHc3VtbWFyeRgIIAEoCRIVCg1wcm9wb3NlZF9uYW1lGAkgASgJEhIKCmNvbmZpZGVuY2UYCiABKAESDgoGbW9kdWxlGAsgASgJEg4KBnJldmlldxgMIAEoCRIOCgZzdGF0dXMYDSABKAkiRQoMRnVuY3Rpb25MaXN0EiYKCWZ1bmN0aW9ucxgBIAMoCzITLnBpc3Rvbi52MS5GdW5jdGlvbhINCgV0b3RhbBgCIAEoDSIdCg9GdW5jdGlvblJlcXVlc3QSCgoCaWQYASABKAkimAIKDkZ1bmN0aW9uRGV0YWlsEiUKCGZ1bmN0aW9uGAEgASgLMhMucGlzdG9uLnYxLkZ1bmN0aW9uEhIKCnBzZXVkb2NvZGUYAiABKAkSDwoHc3RyaW5ncxgDIAMoCRIPCgdpbXBvcnRzGAQgAygJEiQKB2NhbGxlcnMYBSADKAsyEy5waXN0b24udjEuRnVuY3Rpb24SJAoHY2FsbGVlcxgGIAMoCzITLnBpc3Rvbi52MS5GdW5jdGlvbhIVCg1hbmFseXNpc19qc29uGAcgASgJEg0KBW1vZGVsGAggASgJEhMKC3Byb21wdF9oYXNoGAkgASgJEhMKC2Rpc2Fzc2VtYmx5GAogASgJEg0KBXBjb2RlGAsgASgJIp4BCgNKb2ISCgoCaWQYASABKAkSEwoLZnVuY3Rpb25faWQYAiABKAkSDAoEbmFtZRgDIAEoCRINCgVzdGFnZRgEIAEoCRIOCgZzdGF0dXMYBSABKAkSEAoIYXR0ZW1wdHMYBiABKA0SDQoFZXJyb3IYByABKAkSEgoKdXBkYXRlZF9hdBgIIAEoAxIUCgxyZXNlcnZlZF91c2QYCSABKAEiJwoHSm9iTGlzdBIcCgRqb2JzGAEgAygLMg4ucGlzdG9uLnYxLkpvYiJHCgVFdmVudBIKCgJpZBgBIAEoAxISCgpjcmVhdGVkX2F0GAIgASgDEg0KBWxldmVsGAMgASgJEg8KB21lc3NhZ2UYBCABKAkiLQoJRXZlbnRMaXN0EiAKBmV2ZW50cxgBIAMoCzIQLnBpc3Rvbi52MS5FdmVudCIzCg5Db250cm9sUmVxdWVzdBIRCgliaW5hcnlfaWQYASABKAkSDgoGYWN0aW9uGAIgASgJIjQKDVJldmlld1JlcXVlc3QSEwoLZnVuY3Rpb25faWQYASABKAkSDgoGYWNjZXB0GAIgASgIItQBCghTZXR0aW5ncxIVCg1haV9jb25maWd1cmVkGAEgASgIEhkKEWdoaWRyYV9jb25maWd1cmVkGAIgASgIEg0KBW1vZGVsGAMgASgJEhgKEGVzY2FsYXRpb25fbW9kZWwYBCABKAkSEwoLY29uY3VycmVuY3kYBSABKA0SEgoKYnVkZ2V0X3VzZBgGIAEoARIXCg9tYXhfaW5wdXRfYnl0ZXMYByABKA0SFAoMcHJvdmlkZXJfdXJsGAggASgJEhUKDWJhdGNoX2VuYWJsZWQYCSABKAgy+QQKDVBpc3RvblNlcnZpY2USNwoMTGlzdEJpbmFyaWVzEhAucGlzdG9uLnYxLkVtcHR5GhUucGlzdG9uLnYxLkJpbmFyeUxpc3QSOwoMSW1wb3J0QmluYXJ5EhgucGlzdG9uLnYxLkltcG9ydFJlcXVlc3QaES5waXN0b24udjEuQmluYXJ5EjwKC0dldE92ZXJ2aWV3EhgucGlzdG9uLnYxLkJpbmFyeVJlcXVlc3QaEy5waXN0b24udjEuT3ZlcnZpZXcSQgoNTGlzdEZ1bmN0aW9ucxIYLnBpc3Rvbi52MS5GdW5jdGlvblF1ZXJ5GhcucGlzdG9uLnYxLkZ1bmN0aW9uTGlzdBJECgtHZXRGdW5jdGlvbhIaLnBpc3Rvbi52MS5GdW5jdGlvblJlcXVlc3QaGS5waXN0b24udjEuRnVuY3Rpb25EZXRhaWwSOAoITGlzdEpvYnMSGC5waXN0b24udjEuQmluYXJ5UmVxdWVzdBoSLnBpc3Rvbi52MS5Kb2JMaXN0EjwKCkxpc3RFdmVudHMSGC5waXN0b24udjEuQmluYXJ5UmVxdWVzdBoULnBpc3Rvbi52MS5FdmVudExpc3QSPgoPQ29udHJvbFBpcGVsaW5lEhkucGlzdG9uLnYxLkNvbnRyb2xSZXF1ZXN0GhAucGlzdG9uLnYxLkVtcHR5EjwKDlJldmlld1Byb3Bvc2FsEhgucGlzdG9uLnYxLlJldmlld1JlcXVlc3QaEC5waXN0b24udjEuRW1wdHkSNAoLR2V0U2V0dGluZ3MSEC5waXN0b24udjEuRW1wdHkaEy5waXN0b24udjEuU2V0dGluZ3NiBnByb3RvMw");
+  fileDesc("ChZwaXN0b24vdjEvcGlzdG9uLnByb3RvEglwaXN0b24udjEiBwoFRW1wdHkiIgoNQmluYXJ5UmVxdWVzdBIRCgliaW5hcnlfaWQYASABKAkimQEKBkJpbmFyeRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg4KBnNoYTI1NhgDIAEoCRIMCgRzaXplGAQgASgEEhQKDGFyY2hpdGVjdHVyZRgFIAEoCRIOCgZmb3JtYXQYBiABKAkSDgoGc3RhdHVzGAcgASgJEhIKCmNyZWF0ZWRfYXQYCCABKAMSDQoFZXJyb3IYCSABKAkiMQoKQmluYXJ5TGlzdBIjCghiaW5hcmllcxgBIAMoCzIRLnBpc3Rvbi52MS5CaW5hcnkiPAoNSW1wb3J0UmVxdWVzdBIMCgRwYXRoGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHY29udGVudBgDIAEoDCLbAwoIT3ZlcnZpZXcSIQoGYmluYXJ5GAEgASgLMhEucGlzdG9uLnYxLkJpbmFyeRIRCglmdW5jdGlvbnMYAiABKA0SEAoIZWxpZ2libGUYAyABKA0SEAoIYW5hbHl6ZWQYBCABKA0SDgoGcXVldWVkGAUgASgNEg8KB3J1bm5pbmcYBiABKA0SDgoGZmFpbGVkGAcgASgNEhEKCXByb3Bvc2FscxgIIAEoDRIUCgxpbnB1dF90b2tlbnMYCSABKAQSFQoNb3V0cHV0X3Rva2VucxgKIAEoBBIQCghjb3N0X3VzZBgLIAEoARIUCgxyZXNlcnZlZF91c2QYDCABKAESEgoKYnVkZ2V0X3VzZBgNIAEoARINCgVlZGdlcxgOIAEoDRIPCgdtb2R1bGVzGA8gASgNEiQKBXVzYWdlGBAgAygLMhUucGlzdG9uLnYxLlVzYWdlUG9pbnQSIAoGc3RhZ2VzGBEgAygLMhAucGlzdG9uLnYxLlN0YWdlEg4KBnBhdXNlZBgSIAEoCBI5ChNwcm92aWRlcl9icmVha2Rvd25zGBMgAygLMhwucGlzdG9uLnYxLlByb3ZpZGVyQnJlYWtkb3duEhUKDWFjdGl2ZV9ydW5faWQYFCABKAkibQoKVXNhZ2VQb2ludBIOCgZidWNrZXQYASABKAkSFAoMaW5wdXRfdG9rZW5zGAIgASgEEhUKDW91dHB1dF90b2tlbnMYAyABKAQSEAoIY29zdF91c2QYBCABKAESEAoIcmVxdWVzdHMYBSABKA0iWQoFU3RhZ2USDAoEbmFtZRgBIAEoCRIOCgZxdWV1ZWQYAiABKA0SEQoJY29tcGxldGVkGAMgASgNEg4KBmZhaWxlZBgEIAEoDRIPCgdydW5uaW5nGAUgASgNIp4BChFQcm92aWRlckJyZWFrZG93bhINCgVtb2RlbBgBIAEoCRINCgVzdGFnZRgCIAEoCRIQCghyZXF1ZXN0cxgDIAEoDRIUCgxpbnB1dF90b2tlbnMYBCABKAQSFQoNb3V0cHV0X3Rva2VucxgFIAEoBBIQCghjb3N0X3VzZBgGIAEoARIaChJhdmVyYWdlX2xhdGVuY3lfbXMYByABKAEiYQoNRnVuY3Rpb25RdWVyeRIRCgliaW5hcnlfaWQYASABKAkSDgoGc2VhcmNoGAIgASgJEg4KBm9mZnNldBgDIAEoDRINCgVsaW1pdBgEIAEoDRIOCgZmaWx0ZXIYBSABKAkiiAIKCEZ1bmN0aW9uEgoKAmlkGAEgASgJEg8KB2FkZHJlc3MYAiABKAkSDAoEbmFtZRgDIAEoCRIMCgRzaXplGAQgASgEEg8KB2NhbGxlcnMYBSABKA0SDwoHY2FsbGVlcxgGIAEoDRITCgtza2lwX3JlYXNvbhgHIAEoCRIPCgdzdW1tYXJ5GAggASgJEhUKDXByb3Bvc2VkX25hbWUYCSABKAkSEgoKY29uZmlkZW5jZRgKIAEoARIOCgZtb2R1bGUYCyABKAkSDgoGcmV2aWV3GAwgASgJEg4KBnN0YXR1cxgNIAEoCRIRCglyZXN1bHRfaWQYDiABKAkSDQoFc3RhbGUYDyABKAgiRQoMRnVuY3Rpb25MaXN0EiYKCWZ1bmN0aW9ucxgBIAMoCzITLnBpc3Rvbi52MS5GdW5jdGlvbhINCgV0b3RhbBgCIAEoDSIdCg9GdW5jdGlvblJlcXVlc3QSCgoCaWQYASABKAkiwwIKDkZ1bmN0aW9uRGV0YWlsEiUKCGZ1bmN0aW9uGAEgASgLMhMucGlzdG9uLnYxLkZ1bmN0aW9uEhIKCnBzZXVkb2NvZGUYAiABKAkSDwoHc3RyaW5ncxgDIAMoCRIPCgdpbXBvcnRzGAQgAygJEiQKB2NhbGxlcnMYBSADKAsyEy5waXN0b24udjEuRnVuY3Rpb24SJAoHY2FsbGVlcxgGIAMoCzITLnBpc3Rvbi52MS5GdW5jdGlvbhIVCg1hbmFseXNpc19qc29uGAcgASgJEg0KBW1vZGVsGAggASgJEhMKC3Byb21wdF9oYXNoGAkgASgJEhMKC2Rpc2Fzc2VtYmx5GAogASgJEg0KBXBjb2RlGAsgASgJEikKBnJlc3VsdBgMIAEoCzIZLnBpc3Rvbi52MS5BbmFseXNpc1Jlc3VsdCKeAQoDSm9iEgoKAmlkGAEgASgJEhMKC2Z1bmN0aW9uX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSDQoFc3RhZ2UYBCABKAkSDgoGc3RhdHVzGAUgASgJEhAKCGF0dGVtcHRzGAYgASgNEg0KBWVycm9yGAcgASgJEhIKCnVwZGF0ZWRfYXQYCCABKAMSFAoMcmVzZXJ2ZWRfdXNkGAkgASgBIicKB0pvYkxpc3QSHAoEam9icxgBIAMoCzIOLnBpc3Rvbi52MS5Kb2IiRwoFRXZlbnQSCgoCaWQYASABKAMSEgoKY3JlYXRlZF9hdBgCIAEoAxINCgVsZXZlbBgDIAEoCRIPCgdtZXNzYWdlGAQgASgJIi0KCUV2ZW50TGlzdBIgCgZldmVudHMYASADKAsyEC5waXN0b24udjEuRXZlbnQiMwoOQ29udHJvbFJlcXVlc3QSEQoJYmluYXJ5X2lkGAEgASgJEg4KBmFjdGlvbhgCIAEoCSJ6Cg1SZXZpZXdSZXF1ZXN0EhEKCXJlc3VsdF9pZBgDIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgEIAEoDRINCgVmaWVsZBgFIAEoCRIQCghkZWNpc2lvbhgGIAEoCRIOCgZyZWFzb24YByABKAlKBAgBEAJKBAgCEAMi1AEKCFNldHRpbmdzEhUKDWFpX2NvbmZpZ3VyZWQYASABKAgSGQoRZ2hpZHJhX2NvbmZpZ3VyZWQYAiABKAgSDQoFbW9kZWwYAyABKAkSGAoQZXNjYWxhdGlvbl9tb2RlbBgEIAEoCRITCgtjb25jdXJyZW5jeRgFIAEoDRISCgpidWRnZXRfdXNkGAYgASgBEhcKD21heF9pbnB1dF9ieXRlcxgHIAEoDRIUCgxwcm92aWRlcl91cmwYCCABKAkSFQoNYmF0Y2hfZW5hYmxlZBgJIAEoCCLtAgoOQW5hbHlzaXNSZXN1bHQSCgoCaWQYASABKAkSEwoLZnVuY3Rpb25faWQYAiABKAkSFQoNcHJvcG9zZWRfbmFtZRgDIAEoCRIPCgdzdW1tYXJ5GAQgASgJEg4KBmF1dGhvchgFIAEoCRINCgVtb2RlbBgGIAEoCRINCgVzdGFnZRgHIAEoCRINCgVzdGFsZRgIIAEoCBIQCghyZXZpc2lvbhgJIAEoDRITCgtuYW1lX3JldmlldxgKIAEoCRIWCg5zdW1tYXJ5X3JldmlldxgLIAEoCRIVCg1hbmFseXNpc19qc29uGAwgASgJEhUKDWV4dHJhY3Rpb25faWQYDSABKAkSEgoKY3JlYXRlZF9hdBgOIAEoAxIRCglwYXJlbnRfaWQYDyABKAkSFAoMZGVwZW5kZW5jaWVzGBAgAygJEhIKCmlucHV0X2pzb24YESABKAkSFwoPdHJhbnNjcmlwdF9qc29uGBIgASgJIjgKClJlc3VsdExpc3QSKgoHcmVzdWx0cxgBIAMoCzIZLnBpc3Rvbi52MS5BbmFseXNpc1Jlc3VsdCIdCg9BcnRpZmFjdFJlcXVlc3QSCgoCaWQYASABKAkiiAEKCEFydGlmYWN0EgoKAmlkGAEgASgJEhUKDWV4dHJhY3Rpb25faWQYAiABKAkSEwoLZnVuY3Rpb25faWQYAyABKAkSDAoEa2luZBgEIAEoCRIPCgdjb250ZW50GAUgASgJEg4KBnNoYTI1NhgGIAEoCRIVCg1tZXRhZGF0YV9qc29uGAcgASgJInkKEUNvcnJlY3Rpb25SZXF1ZXN0EhEKCXJlc3VsdF9pZBgBIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgCIAEoDRIVCg1wcm9wb3NlZF9uYW1lGAMgASgJEg8KB3N1bW1hcnkYBCABKAkSDgoGcmVhc29uGAUgASgJInkKEVJlYW5hbHlzaXNSZXF1ZXN0EhEKCWJpbmFyeV9pZBgBIAEoCRIUCgxmdW5jdGlvbl9pZHMYAiADKAkSEgoKc3RhbGVfb25seRgDIAEoCBIYChBpbnZlc3RpZ2F0aW9uX2lkGAQgASgJEg0KBXN0YWdlGAUgASgJIikKC1J1blJlc3BvbnNlEgoKAmlkGAEgASgJEg4KBnF1ZXVlZBgCIAEoDSKfAQoNSW52ZXN0aWdhdGlvbhIKCgJpZBgBIAEoCRIRCgliaW5hcnlfaWQYAiABKAkSEAoIcXVlc3Rpb24YAyABKAkSDQoFbm90ZXMYBCABKAkSEgoKYnVkZ2V0X3VzZBgFIAEoARIQCghyZXZpc2lvbhgGIAEoDRIUCgxmdW5jdGlvbl9pZHMYByADKAkSEgoKcmVzdWx0X2lkcxgIIAMoCSJFChFJbnZlc3RpZ2F0aW9uTGlzdBIwCg5pbnZlc3RpZ2F0aW9ucxgBIAMoCzIYLnBpc3Rvbi52MS5JbnZlc3RpZ2F0aW9uIhoKDEFwcGx5UmVxdWVzdBIKCgJpZBgBIAEoCSKwAQoJQXBwbHlJdGVtEhEKCXJlc3VsdF9pZBgBIAEoCRIQCghyZXZpc2lvbhgCIAEoDRIPCgdhZGRyZXNzGAMgASgJEhUKDWV4cGVjdGVkX25hbWUYBCABKAkSGAoQZXhwZWN0ZWRfY29tbWVudBgFIAEoCRIMCgRuYW1lGAYgASgJEg8KB3N1bW1hcnkYByABKAkSDgoGc3RhdHVzGAggASgJEg0KBWVycm9yGAkgASgJInMKDkFwcGx5T3BlcmF0aW9uEgoKAmlkGAEgASgJEhEKCWJpbmFyeV9pZBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSDQoFZXJyb3IYBCABKAkSIwoFaXRlbXMYBSADKAsyFC5waXN0b24udjEuQXBwbHlJdGVtIisKCUdyYXBoRWRnZRIOCgZjYWxsZXIYASABKAkSDgoGY2FsbGVlGAIgASgJIl8KBUdyYXBoEiIKBW5vZGVzGAEgAygLMhMucGlzdG9uLnYxLkZ1bmN0aW9uEiMKBWVkZ2VzGAIgAygLMhQucGlzdG9uLnYxLkdyYXBoRWRnZRINCgV0b3RhbBgDIAEoDSJDChJBcHBseU9wZXJhdGlvbkxpc3QSLQoKb3BlcmF0aW9ucxgBIAMoCzIZLnBpc3Rvbi52MS5BcHBseU9wZXJhdGlvbjL0CgoNUGlzdG9uU2VydmljZRI3CgxMaXN0QmluYXJpZXMSEC5waXN0b24udjEuRW1wdHkaFS5waXN0b24udjEuQmluYXJ5TGlzdBI7CgxJbXBvcnRCaW5hcnkSGC5waXN0b24udjEuSW1wb3J0UmVxdWVzdBoRLnBpc3Rvbi52MS5CaW5hcnkSPAoLR2V0T3ZlcnZpZXcSGC5waXN0b24udjEuQmluYXJ5UmVxdWVzdBoTLnBpc3Rvbi52MS5PdmVydmlldxJCCg1MaXN0RnVuY3Rpb25zEhgucGlzdG9uLnYxLkZ1bmN0aW9uUXVlcnkaFy5waXN0b24udjEuRnVuY3Rpb25MaXN0EkQKC0dldEZ1bmN0aW9uEhoucGlzdG9uLnYxLkZ1bmN0aW9uUmVxdWVzdBoZLnBpc3Rvbi52MS5GdW5jdGlvbkRldGFpbBI4CghMaXN0Sm9icxIYLnBpc3Rvbi52MS5CaW5hcnlSZXF1ZXN0GhIucGlzdG9uLnYxLkpvYkxpc3QSPAoKTGlzdEV2ZW50cxIYLnBpc3Rvbi52MS5CaW5hcnlSZXF1ZXN0GhQucGlzdG9uLnYxLkV2ZW50TGlzdBI+Cg9Db250cm9sUGlwZWxpbmUSGS5waXN0b24udjEuQ29udHJvbFJlcXVlc3QaEC5waXN0b24udjEuRW1wdHkSPAoOUmV2aWV3UHJvcG9zYWwSGC5waXN0b24udjEuUmV2aWV3UmVxdWVzdBoQLnBpc3Rvbi52MS5FbXB0eRI2CghHZXRHcmFwaBIYLnBpc3Rvbi52MS5CaW5hcnlSZXF1ZXN0GhAucGlzdG9uLnYxLkdyYXBoEkIKCUdldFJlc3VsdBIaLnBpc3Rvbi52MS5BcnRpZmFjdFJlcXVlc3QaGS5waXN0b24udjEuQW5hbHlzaXNSZXN1bHQSQAoLTGlzdFJlc3VsdHMSGi5waXN0b24udjEuRnVuY3Rpb25SZXF1ZXN0GhUucGlzdG9uLnYxLlJlc3VsdExpc3QSPgoLR2V0QXJ0aWZhY3QSGi5waXN0b24udjEuQXJ0aWZhY3RSZXF1ZXN0GhMucGlzdG9uLnYxLkFydGlmYWN0EkgKDUNvcnJlY3RSZXN1bHQSHC5waXN0b24udjEuQ29ycmVjdGlvblJlcXVlc3QaGS5waXN0b24udjEuQW5hbHlzaXNSZXN1bHQSQQoJUmVhbmFseXplEhwucGlzdG9uLnYxLlJlYW5hbHlzaXNSZXF1ZXN0GhYucGlzdG9uLnYxLlJ1blJlc3BvbnNlEkwKEkxpc3RJbnZlc3RpZ2F0aW9ucxIYLnBpc3Rvbi52MS5CaW5hcnlSZXF1ZXN0GhwucGlzdG9uLnYxLkludmVzdGlnYXRpb25MaXN0EkcKEVNhdmVJbnZlc3RpZ2F0aW9uEhgucGlzdG9uLnYxLkludmVzdGlnYXRpb24aGC5waXN0b24udjEuSW52ZXN0aWdhdGlvbhJDCgxQcmV2aWV3QXBwbHkSGC5waXN0b24udjEuQmluYXJ5UmVxdWVzdBoZLnBpc3Rvbi52MS5BcHBseU9wZXJhdGlvbhJOChNMaXN0QXBwbHlPcGVyYXRpb25zEhgucGlzdG9uLnYxLkJpbmFyeVJlcXVlc3QaHS5waXN0b24udjEuQXBwbHlPcGVyYXRpb25MaXN0EkIKDEV4ZWN1dGVBcHBseRIXLnBpc3Rvbi52MS5BcHBseVJlcXVlc3QaGS5waXN0b24udjEuQXBwbHlPcGVyYXRpb24SNAoLR2V0U2V0dGluZ3MSEC5waXN0b24udjEuRW1wdHkaEy5waXN0b24udjEuU2V0dGluZ3NiBnByb3RvMw");
 
 /**
  * @generated from message piston.v1.Empty
@@ -241,6 +241,11 @@ export type Overview = Message<"piston.v1.Overview"> & {
    * @generated from field: repeated piston.v1.ProviderBreakdown provider_breakdowns = 19;
    */
   providerBreakdowns: ProviderBreakdown[];
+
+  /**
+   * @generated from field: string active_run_id = 20;
+   */
+  activeRunId: string;
 };
 
 /**
@@ -476,6 +481,16 @@ export type Function = Message<"piston.v1.Function"> & {
    * @generated from field: string status = 13;
    */
   status: string;
+
+  /**
+   * @generated from field: string result_id = 14;
+   */
+  resultId: string;
+
+  /**
+   * @generated from field: bool stale = 15;
+   */
+  stale: boolean;
 };
 
 /**
@@ -582,6 +597,11 @@ export type FunctionDetail = Message<"piston.v1.FunctionDetail"> & {
    * @generated from field: string pcode = 11;
    */
   pcode: string;
+
+  /**
+   * @generated from field: piston.v1.AnalysisResult result = 12;
+   */
+  result?: AnalysisResult | undefined;
 };
 
 /**
@@ -741,14 +761,29 @@ export const ControlRequestSchema: GenMessage<ControlRequest> = /*@__PURE__*/
  */
 export type ReviewRequest = Message<"piston.v1.ReviewRequest"> & {
   /**
-   * @generated from field: string function_id = 1;
+   * @generated from field: string result_id = 3;
    */
-  functionId: string;
+  resultId: string;
 
   /**
-   * @generated from field: bool accept = 2;
+   * @generated from field: uint32 expected_revision = 4;
    */
-  accept: boolean;
+  expectedRevision: number;
+
+  /**
+   * @generated from field: string field = 5;
+   */
+  field: string;
+
+  /**
+   * @generated from field: string decision = 6;
+   */
+  decision: string;
+
+  /**
+   * @generated from field: string reason = 7;
+   */
+  reason: string;
 };
 
 /**
@@ -814,6 +849,531 @@ export type Settings = Message<"piston.v1.Settings"> & {
  */
 export const SettingsSchema: GenMessage<Settings> = /*@__PURE__*/
   messageDesc(file_piston_v1_piston, 20);
+
+/**
+ * @generated from message piston.v1.AnalysisResult
+ */
+export type AnalysisResult = Message<"piston.v1.AnalysisResult"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string function_id = 2;
+   */
+  functionId: string;
+
+  /**
+   * @generated from field: string proposed_name = 3;
+   */
+  proposedName: string;
+
+  /**
+   * @generated from field: string summary = 4;
+   */
+  summary: string;
+
+  /**
+   * @generated from field: string author = 5;
+   */
+  author: string;
+
+  /**
+   * @generated from field: string model = 6;
+   */
+  model: string;
+
+  /**
+   * @generated from field: string stage = 7;
+   */
+  stage: string;
+
+  /**
+   * @generated from field: bool stale = 8;
+   */
+  stale: boolean;
+
+  /**
+   * @generated from field: uint32 revision = 9;
+   */
+  revision: number;
+
+  /**
+   * @generated from field: string name_review = 10;
+   */
+  nameReview: string;
+
+  /**
+   * @generated from field: string summary_review = 11;
+   */
+  summaryReview: string;
+
+  /**
+   * @generated from field: string analysis_json = 12;
+   */
+  analysisJson: string;
+
+  /**
+   * @generated from field: string extraction_id = 13;
+   */
+  extractionId: string;
+
+  /**
+   * @generated from field: int64 created_at = 14;
+   */
+  createdAt: bigint;
+
+  /**
+   * @generated from field: string parent_id = 15;
+   */
+  parentId: string;
+
+  /**
+   * @generated from field: repeated string dependencies = 16;
+   */
+  dependencies: string[];
+
+  /**
+   * @generated from field: string input_json = 17;
+   */
+  inputJson: string;
+
+  /**
+   * @generated from field: string transcript_json = 18;
+   */
+  transcriptJson: string;
+};
+
+/**
+ * Describes the message piston.v1.AnalysisResult.
+ * Use `create(AnalysisResultSchema)` to create a new message.
+ */
+export const AnalysisResultSchema: GenMessage<AnalysisResult> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 21);
+
+/**
+ * @generated from message piston.v1.ResultList
+ */
+export type ResultList = Message<"piston.v1.ResultList"> & {
+  /**
+   * @generated from field: repeated piston.v1.AnalysisResult results = 1;
+   */
+  results: AnalysisResult[];
+};
+
+/**
+ * Describes the message piston.v1.ResultList.
+ * Use `create(ResultListSchema)` to create a new message.
+ */
+export const ResultListSchema: GenMessage<ResultList> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 22);
+
+/**
+ * @generated from message piston.v1.ArtifactRequest
+ */
+export type ArtifactRequest = Message<"piston.v1.ArtifactRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message piston.v1.ArtifactRequest.
+ * Use `create(ArtifactRequestSchema)` to create a new message.
+ */
+export const ArtifactRequestSchema: GenMessage<ArtifactRequest> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 23);
+
+/**
+ * @generated from message piston.v1.Artifact
+ */
+export type Artifact = Message<"piston.v1.Artifact"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string extraction_id = 2;
+   */
+  extractionId: string;
+
+  /**
+   * @generated from field: string function_id = 3;
+   */
+  functionId: string;
+
+  /**
+   * @generated from field: string kind = 4;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string content = 5;
+   */
+  content: string;
+
+  /**
+   * @generated from field: string sha256 = 6;
+   */
+  sha256: string;
+
+  /**
+   * @generated from field: string metadata_json = 7;
+   */
+  metadataJson: string;
+};
+
+/**
+ * Describes the message piston.v1.Artifact.
+ * Use `create(ArtifactSchema)` to create a new message.
+ */
+export const ArtifactSchema: GenMessage<Artifact> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 24);
+
+/**
+ * @generated from message piston.v1.CorrectionRequest
+ */
+export type CorrectionRequest = Message<"piston.v1.CorrectionRequest"> & {
+  /**
+   * @generated from field: string result_id = 1;
+   */
+  resultId: string;
+
+  /**
+   * @generated from field: uint32 expected_revision = 2;
+   */
+  expectedRevision: number;
+
+  /**
+   * @generated from field: string proposed_name = 3;
+   */
+  proposedName: string;
+
+  /**
+   * @generated from field: string summary = 4;
+   */
+  summary: string;
+
+  /**
+   * @generated from field: string reason = 5;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message piston.v1.CorrectionRequest.
+ * Use `create(CorrectionRequestSchema)` to create a new message.
+ */
+export const CorrectionRequestSchema: GenMessage<CorrectionRequest> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 25);
+
+/**
+ * @generated from message piston.v1.ReanalysisRequest
+ */
+export type ReanalysisRequest = Message<"piston.v1.ReanalysisRequest"> & {
+  /**
+   * @generated from field: string binary_id = 1;
+   */
+  binaryId: string;
+
+  /**
+   * @generated from field: repeated string function_ids = 2;
+   */
+  functionIds: string[];
+
+  /**
+   * @generated from field: bool stale_only = 3;
+   */
+  staleOnly: boolean;
+
+  /**
+   * @generated from field: string investigation_id = 4;
+   */
+  investigationId: string;
+
+  /**
+   * @generated from field: string stage = 5;
+   */
+  stage: string;
+};
+
+/**
+ * Describes the message piston.v1.ReanalysisRequest.
+ * Use `create(ReanalysisRequestSchema)` to create a new message.
+ */
+export const ReanalysisRequestSchema: GenMessage<ReanalysisRequest> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 26);
+
+/**
+ * @generated from message piston.v1.RunResponse
+ */
+export type RunResponse = Message<"piston.v1.RunResponse"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: uint32 queued = 2;
+   */
+  queued: number;
+};
+
+/**
+ * Describes the message piston.v1.RunResponse.
+ * Use `create(RunResponseSchema)` to create a new message.
+ */
+export const RunResponseSchema: GenMessage<RunResponse> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 27);
+
+/**
+ * @generated from message piston.v1.Investigation
+ */
+export type Investigation = Message<"piston.v1.Investigation"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string binary_id = 2;
+   */
+  binaryId: string;
+
+  /**
+   * @generated from field: string question = 3;
+   */
+  question: string;
+
+  /**
+   * @generated from field: string notes = 4;
+   */
+  notes: string;
+
+  /**
+   * @generated from field: double budget_usd = 5;
+   */
+  budgetUsd: number;
+
+  /**
+   * @generated from field: uint32 revision = 6;
+   */
+  revision: number;
+
+  /**
+   * @generated from field: repeated string function_ids = 7;
+   */
+  functionIds: string[];
+
+  /**
+   * @generated from field: repeated string result_ids = 8;
+   */
+  resultIds: string[];
+};
+
+/**
+ * Describes the message piston.v1.Investigation.
+ * Use `create(InvestigationSchema)` to create a new message.
+ */
+export const InvestigationSchema: GenMessage<Investigation> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 28);
+
+/**
+ * @generated from message piston.v1.InvestigationList
+ */
+export type InvestigationList = Message<"piston.v1.InvestigationList"> & {
+  /**
+   * @generated from field: repeated piston.v1.Investigation investigations = 1;
+   */
+  investigations: Investigation[];
+};
+
+/**
+ * Describes the message piston.v1.InvestigationList.
+ * Use `create(InvestigationListSchema)` to create a new message.
+ */
+export const InvestigationListSchema: GenMessage<InvestigationList> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 29);
+
+/**
+ * @generated from message piston.v1.ApplyRequest
+ */
+export type ApplyRequest = Message<"piston.v1.ApplyRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message piston.v1.ApplyRequest.
+ * Use `create(ApplyRequestSchema)` to create a new message.
+ */
+export const ApplyRequestSchema: GenMessage<ApplyRequest> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 30);
+
+/**
+ * @generated from message piston.v1.ApplyItem
+ */
+export type ApplyItem = Message<"piston.v1.ApplyItem"> & {
+  /**
+   * @generated from field: string result_id = 1;
+   */
+  resultId: string;
+
+  /**
+   * @generated from field: uint32 revision = 2;
+   */
+  revision: number;
+
+  /**
+   * @generated from field: string address = 3;
+   */
+  address: string;
+
+  /**
+   * @generated from field: string expected_name = 4;
+   */
+  expectedName: string;
+
+  /**
+   * @generated from field: string expected_comment = 5;
+   */
+  expectedComment: string;
+
+  /**
+   * @generated from field: string name = 6;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string summary = 7;
+   */
+  summary: string;
+
+  /**
+   * @generated from field: string status = 8;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string error = 9;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message piston.v1.ApplyItem.
+ * Use `create(ApplyItemSchema)` to create a new message.
+ */
+export const ApplyItemSchema: GenMessage<ApplyItem> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 31);
+
+/**
+ * @generated from message piston.v1.ApplyOperation
+ */
+export type ApplyOperation = Message<"piston.v1.ApplyOperation"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string binary_id = 2;
+   */
+  binaryId: string;
+
+  /**
+   * @generated from field: string status = 3;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string error = 4;
+   */
+  error: string;
+
+  /**
+   * @generated from field: repeated piston.v1.ApplyItem items = 5;
+   */
+  items: ApplyItem[];
+};
+
+/**
+ * Describes the message piston.v1.ApplyOperation.
+ * Use `create(ApplyOperationSchema)` to create a new message.
+ */
+export const ApplyOperationSchema: GenMessage<ApplyOperation> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 32);
+
+/**
+ * @generated from message piston.v1.GraphEdge
+ */
+export type GraphEdge = Message<"piston.v1.GraphEdge"> & {
+  /**
+   * @generated from field: string caller = 1;
+   */
+  caller: string;
+
+  /**
+   * @generated from field: string callee = 2;
+   */
+  callee: string;
+};
+
+/**
+ * Describes the message piston.v1.GraphEdge.
+ * Use `create(GraphEdgeSchema)` to create a new message.
+ */
+export const GraphEdgeSchema: GenMessage<GraphEdge> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 33);
+
+/**
+ * @generated from message piston.v1.Graph
+ */
+export type Graph = Message<"piston.v1.Graph"> & {
+  /**
+   * @generated from field: repeated piston.v1.Function nodes = 1;
+   */
+  nodes: Function[];
+
+  /**
+   * @generated from field: repeated piston.v1.GraphEdge edges = 2;
+   */
+  edges: GraphEdge[];
+
+  /**
+   * @generated from field: uint32 total = 3;
+   */
+  total: number;
+};
+
+/**
+ * Describes the message piston.v1.Graph.
+ * Use `create(GraphSchema)` to create a new message.
+ */
+export const GraphSchema: GenMessage<Graph> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 34);
+
+/**
+ * @generated from message piston.v1.ApplyOperationList
+ */
+export type ApplyOperationList = Message<"piston.v1.ApplyOperationList"> & {
+  /**
+   * @generated from field: repeated piston.v1.ApplyOperation operations = 1;
+   */
+  operations: ApplyOperation[];
+};
+
+/**
+ * Describes the message piston.v1.ApplyOperationList.
+ * Use `create(ApplyOperationListSchema)` to create a new message.
+ */
+export const ApplyOperationListSchema: GenMessage<ApplyOperationList> = /*@__PURE__*/
+  messageDesc(file_piston_v1_piston, 35);
 
 /**
  * @generated from service piston.v1.PistonService
@@ -890,6 +1450,94 @@ export const PistonService: GenService<{
     methodKind: "unary";
     input: typeof ReviewRequestSchema;
     output: typeof EmptySchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.GetGraph
+   */
+  getGraph: {
+    methodKind: "unary";
+    input: typeof BinaryRequestSchema;
+    output: typeof GraphSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.GetResult
+   */
+  getResult: {
+    methodKind: "unary";
+    input: typeof ArtifactRequestSchema;
+    output: typeof AnalysisResultSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.ListResults
+   */
+  listResults: {
+    methodKind: "unary";
+    input: typeof FunctionRequestSchema;
+    output: typeof ResultListSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.GetArtifact
+   */
+  getArtifact: {
+    methodKind: "unary";
+    input: typeof ArtifactRequestSchema;
+    output: typeof ArtifactSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.CorrectResult
+   */
+  correctResult: {
+    methodKind: "unary";
+    input: typeof CorrectionRequestSchema;
+    output: typeof AnalysisResultSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.Reanalyze
+   */
+  reanalyze: {
+    methodKind: "unary";
+    input: typeof ReanalysisRequestSchema;
+    output: typeof RunResponseSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.ListInvestigations
+   */
+  listInvestigations: {
+    methodKind: "unary";
+    input: typeof BinaryRequestSchema;
+    output: typeof InvestigationListSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.SaveInvestigation
+   */
+  saveInvestigation: {
+    methodKind: "unary";
+    input: typeof InvestigationSchema;
+    output: typeof InvestigationSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.PreviewApply
+   */
+  previewApply: {
+    methodKind: "unary";
+    input: typeof BinaryRequestSchema;
+    output: typeof ApplyOperationSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.ListApplyOperations
+   */
+  listApplyOperations: {
+    methodKind: "unary";
+    input: typeof BinaryRequestSchema;
+    output: typeof ApplyOperationListSchema;
+  },
+  /**
+   * @generated from rpc piston.v1.PistonService.ExecuteApply
+   */
+  executeApply: {
+    methodKind: "unary";
+    input: typeof ApplyRequestSchema;
+    output: typeof ApplyOperationSchema;
   },
   /**
    * @generated from rpc piston.v1.PistonService.GetSettings

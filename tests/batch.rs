@@ -91,10 +91,24 @@ async fn batch_submit_and_partial_collection_conserve_jobs_and_reservations() {
         .await
         .unwrap();
     assert_eq!(jobs.len(), 2);
+    let pinned: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
+        .bind(jobs[0].get::<String, _>("id"))
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    let pinned: piston_decompiler::ai::Prompt = serde_json::from_str(&pinned).unwrap();
     let analysis = Analysis {
         proposed_name: "return_constant".into(),
         summary: "Returns a constant integer.".into(),
         confidence: 0.9,
+        claims: vec![piston_decompiler::ai::Claim {
+            text: "Returns an integer.".into(),
+            references: vec![piston_decompiler::ai::EvidenceReference {
+                artifact_id: pinned.evidence[0].artifact_id.clone(),
+                start_line: 1,
+                end_line: 1,
+            }],
+        }],
         evidence: vec!["The return statement contains a constant.".into()],
         parameter_types: vec![],
         side_effects: vec![],

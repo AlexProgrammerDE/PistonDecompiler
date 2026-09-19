@@ -48,12 +48,21 @@ const library = createRoute({
 const binary = createRoute({
   getParentRoute: () => rootRoute,
   path: "/binaries/$binaryId",
-  validateSearch: (search: Record<string, unknown>): { view: BinaryView } => ({
-    view: ["functions", "pipeline", "usage", "events"].includes(
-      String(search.view)
-    )
+  validateSearch: (
+    search: Record<string, unknown>
+  ): { view: BinaryView; functionId?: string } => ({
+    view: [
+      "functions",
+      "pipeline",
+      "usage",
+      "events",
+      "investigations",
+      "live",
+    ].includes(String(search.view))
       ? (search.view as BinaryView)
       : "functions",
+    functionId:
+      typeof search.functionId === "string" ? search.functionId : undefined,
   }),
   component: BinaryPage,
   pendingComponent: PendingPage,

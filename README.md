@@ -3,22 +3,25 @@
 [![CI](https://github.com/AlexProgrammerDE/PistonDecompiler/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexProgrammerDE/PistonDecompiler/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/LICENSE)
 
-Piston connects Ghidra's binary analysis to a persistent Rust pipeline and a TanStack web workbench.
+PistonDecompiler connects Ghidra's binary analysis to a persistent Rust pipeline and a TanStack web workbench.
 Import a binary, index its functions and call graph, then run bounded AI analysis and review the proposed changes.
 
-**Status: initial implementation.** Local Rust tests, a production frontend build, and a real Ghidra extraction passed.
-Paid provider integration, large-binary performance, and the full writeback lifecycle still need validation.
-See [the development handoff](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/docs/continuation.md) for the current checkpoint.
+**Status: active development.** The workbench supports evidence review, corrections, scoped investigations, and previewed Ghidra writeback.
+Rust tests and a real Ghidra 12.1.3 extraction, apply, and re-export round trip passed on Linux.
+Paid provider behavior, model quality, and large-binary performance remain unmeasured.
 
 ## What is implemented
 
 - Immutable binary snapshots, SHA-256 identity, and ELF, PE, Mach-O, and COFF metadata.
 - Ghidra headless export of pseudocode, assembly, P-code, strings, imports, and call edges.
 - SQLite persistence, full-text function search, graph neighborhoods, and resumable jobs.
-- Parallel map analysis, dependency summaries, and bounded escalation through read-only evidence tools.
+- Bounded Tokio workers and Rig-powered AI requests with pinned inputs, dependency summaries, and read-only evidence tools.
+- Immutable extraction artifacts, linked evidence, result history, and human corrections with downstream invalidation.
+- Saved investigations with questions, notes, findings, scope, and durable spending limits.
+- Live event replay, an interactive call graph, and Motion animations that respect reduced-motion preferences.
 - Configurable provider endpoints, prices, concurrency, context limits, and budget reservations.
 - Asynchronous batch submission, remote ID recovery, and idempotent result collection.
-- Proposal review and a single Ghidra writer for accepted function names and comments.
+- Per-field proposal review and exact change previews, with expected-value conflict checks and recoverable Ghidra apply operations.
 - A gRPC-Web API and a Bun/Vite frontend served from the same Rust endpoint.
 - TanStack Router, Query, Store, Table, Form, Pacer, Charts, and development tools.
 
@@ -34,18 +37,18 @@ The repository pins its Rust toolchain in `rust-toolchain.toml`.
 git clone https://github.com/AlexProgrammerDE/PistonDecompiler.git
 cd PistonDecompiler
 bun install --cwd web
-cp piston.example.toml piston.toml
+cp pistondecompiler.example.toml pistondecompiler.toml
 export GHIDRA_HOME=/path/to/ghidra
 bun run build
-./target/release/piston serve
+./target/release/pistondecompiler serve
 ```
 
 Open [the local workbench](http://127.0.0.1:7070).
 Import a binary, then select **Extract with Ghidra**.
 
-Before AI analysis, configure a model and its current token prices in `piston.toml`.
+Before AI analysis, configure a model and its current token prices in `pistondecompiler.toml`.
 Set the key in the environment variable named by `ai.api_key_env`.
-The default variable is `PISTON_AI_API_KEY`.
+The default variable is `PISTONDECOMPILER_AI_API_KEY`.
 No paid requests start without this configuration.
 
 For frontend development, run the backend and Vite in separate terminals:
@@ -60,26 +63,27 @@ Vite serves port 3000 and proxies gRPC-Web to port 7070.
 ## CLI
 
 ```bash
-piston import /path/to/program --extract
-piston status
-piston status BINARY_ID
-piston run BINARY_ID
-piston control BINARY_ID pause
-piston control BINARY_ID retry
-piston review FUNCTION_ID --accept
-piston apply BINARY_ID
+pistondecompiler import /path/to/program --extract
+pistondecompiler status
+pistondecompiler status BINARY_ID
+pistondecompiler run BINARY_ID
+pistondecompiler control BINARY_ID pause
+pistondecompiler control BINARY_ID retry
+pistondecompiler review RESULT_ID --revision REVISION --accept
+pistondecompiler preview BINARY_ID
+pistondecompiler apply OPERATION_ID
 ```
 
-Use `piston --help` for the full command list.
+Use `pistondecompiler --help` for the full command list.
 The CLI and server share a data-directory lock. Stop the server before a CLI operation on that directory.
 
 For a compatible asynchronous batch provider:
 
 ```bash
-piston batch submit BINARY_ID
-piston batch list
-piston batch collect BATCH_ID
-piston batch abandon BATCH_ID
+pistondecompiler batch submit BINARY_ID
+pistondecompiler batch list
+pistondecompiler batch collect BATCH_ID
+pistondecompiler batch abandon BATCH_ID
 ```
 
 Enable `ai.batch_enabled` and verify the provider's endpoint behavior first.
@@ -88,13 +92,41 @@ A batch discount is never assumed. Configure `batch_price_multiplier` for your e
 `batch abandon` returns a batch that stopped during preparation to the queue.
 If submission started, inspect the provider first. Then use `--confirmed-not-submitted` only when no matching provider batch exists.
 
+## Investigate and review
+
+Select a function, then open **Investigations** to save a question and its direct call neighborhood.
+Queue that scope and select **Run analysis**. The queue pins evidence and dependency revisions before requests start.
+The investigation question is included in each scoped prompt. Notes and findings persist across restarts.
+An active scope holds unrelated queued work. **Include all queued work** restores the full queue.
+
+Open a result's evidence links to inspect immutable artifacts and cited lines.
+A valid citation proves that the referenced lines were supplied, not that the model's interpretation is correct.
+Accept or reject the name and summary separately. Each decision targets the result revision you inspected.
+A human correction creates a new result and marks dependent conclusions stale.
+Use **Reconsider stale findings** to queue affected functions, or explicitly request deeper evidence analysis.
+There is no automatic escalation or repeated convergence loop.
+
+Preview accepted changes before applying them. The saved operation contains exact revisions, old values, and desired values.
+Ghidra reports conflicts when its current name or comment differs from both the expected and desired values.
+Interrupted operations remain uncertain. Open the saved operation and retry it to reconcile the same changes.
+Review is blocked for results in an unresolved apply operation.
+
+## Upgrading an existing checkout
+
+The executable is now `pistondecompiler`; the default configuration is `pistondecompiler.toml`.
+Rename an existing configuration or pass its path through `--config`.
+Remove the obsolete `confidence_threshold` setting and update the API-key variable if using the new default.
+The existing data directory, database name, Ghidra project name, and Protobuf package remain compatible.
+SQLite migrations preserve old results. Legacy extraction provenance is explicitly marked unknown.
+The review and apply API requests changed; rebuild the frontend and backend together.
+
 ## Accounting and limitations
 
 The scheduler reserves estimated maximum request costs before dispatch.
 A request without confirmed usage retains a conservative charge.
 Provider prices, token usage reports, and invoices determine actual billing.
 
-Ghidra runs as a subprocess under your account. Piston does not sandbox Ghidra or execute the imported program.
+Ghidra runs as a subprocess under your account. PistonDecompiler does not sandbox Ghidra or execute the imported program.
 The server binds to loopback and currently has no user authentication.
 Use it only in a trusted local environment. Read [SECURITY.md](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/SECURITY.md) before processing sensitive binaries.
 
@@ -112,6 +144,7 @@ bun run --cwd web build
 ```
 
 Rust integration tests exercise queue concurrency, reservations, recovery, idempotency, search, and bounded evidence tools with a local mock provider.
+The [evaluation corpus](https://github.com/AlexProgrammerDE/PistonDecompiler/tree/main/fixtures/evaluation) provides optimized and stripped variants, a behavioral rubric, and a repeatable review procedure.
 The [sample C program](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/fixtures/sample.c) supports manual Ghidra smoke tests.
 
 See [CONTRIBUTING.md](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/CONTRIBUTING.md) for contribution guidelines and [SECURITY.md](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/SECURITY.md) for private vulnerability reports.

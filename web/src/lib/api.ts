@@ -44,5 +44,6 @@ export async function invalidateBinary(binaryId: string) {
     queryClient.invalidateQueries({ queryKey: ["binary", binaryId] }),
     queryClient.invalidateQueries({ queryKey: ["binaries"] }),
     queryClient.invalidateQueries({ queryKey: ["function"] }),
+    queryClient.invalidateQueries({ queryKey: ["result"] }),
   ])
 }

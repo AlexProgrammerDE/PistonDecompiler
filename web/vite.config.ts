@@ -10,6 +10,7 @@ export default defineConfig({
         target: "http://127.0.0.1:7070",
         changeOrigin: true,
       },
+      "/events": { target: "http://127.0.0.1:7070", changeOrigin: true },
       "/healthz": { target: "http://127.0.0.1:7070", changeOrigin: true },
     },
   },

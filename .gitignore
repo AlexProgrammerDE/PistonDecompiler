@@ -1,6 +1,7 @@
 /target/
 /data/
 /piston.toml
+/pistondecompiler.toml
 .env
 *.db
 *.db-shm

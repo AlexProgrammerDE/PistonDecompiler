@@ -75,12 +75,14 @@ export function FunctionTable({
           header: "Bytes",
           cell: (info) => count(info.getValue()),
         }),
-        helper.accessor("confidence", {
-          header: "Confidence",
+        helper.accessor("stale", {
+          header: "Evidence status",
           cell: (info) =>
-            info.row.original.summary
-              ? `${Math.round(info.getValue() * 100)}%`
-              : "Pending",
+            info.getValue()
+              ? "Needs reconsideration"
+              : info.row.original.resultId
+                ? "Available"
+                : "Not analyzed",
         }),
         helper.accessor("status", {
           header: "Status",
@@ -126,6 +128,7 @@ export function FunctionTable({
           <option value="eligible">Eligible</option>
           <option value="review">Needs review</option>
           <option value="accepted">Accepted</option>
+          <option value="stale">Needs reconsideration</option>
           <option value="skipped">Skipped</option>
         </select>
       </div>
