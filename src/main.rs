@@ -98,8 +98,23 @@ enum BatchCommand {
     },
     List,
 }
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let env_path = cli.config.with_file_name(".env");
+    if let Err(error) = dotenvy::from_path(&env_path) {
+        anyhow::ensure!(
+            error.not_found(),
+            "Cannot load {}. Check file permissions and dotenv syntax.",
+            env_path.display()
+        );
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -107,7 +122,6 @@ async fn main() -> Result<()> {
         )
         .with_writer(std::io::stderr)
         .init();
-    let cli = Cli::parse();
     let config = Arc::new(Config::load(&cli.config)?);
     tokio::fs::create_dir_all(&config.data_dir).await?;
     let lock = std::fs::OpenOptions::new()

@@ -47,7 +47,10 @@ Open [the local workbench](http://127.0.0.1:7070).
 Import a binary, then select **Extract with Ghidra**.
 
 Before AI analysis, configure a model and its current token prices in `pistondecompiler.toml`.
-Set the key in the environment variable named by `ai.api_key_env`.
+Copy `.env.example` to `.env` and enter your OpenRouter key as `PISTONDECOMPILER_AI_API_KEY`.
+The CLI loads `.env` beside the selected configuration file before starting its workers.
+Existing environment variables take precedence. Local `.env` files are ignored by Git.
+For other providers, use the variable named by `ai.api_key_env`.
 The default variable is `PISTONDECOMPILER_AI_API_KEY`.
 No paid requests start without this configuration.
 

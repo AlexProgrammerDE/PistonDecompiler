@@ -1652,6 +1652,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "dotenvy",
  "fs2",
  "futures",
  "hex",
