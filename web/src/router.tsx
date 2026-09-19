@@ -6,11 +6,7 @@ import {
 } from "@tanstack/react-router"
 import { AppShell } from "@/components/AppShell"
 import type { BinaryView } from "@/pages/BinaryPage"
-import {
-  EmptyNotice,
-  ErrorNotice,
-  LoadingRows,
-} from "@/components/Feedback"
+import { EmptyNotice, ErrorNotice, LoadingRows } from "@/components/Feedback"
 
 const LibraryPage = lazyRouteComponent(
   () => import("@/pages/LibraryPage"),

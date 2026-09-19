@@ -65,8 +65,8 @@ export function ImportDialog() {
         <DialogHeader>
           <DialogTitle>Import a binary</DialogTitle>
           <DialogDescription>
-            Choose an ELF, PE, Mach-O, COFF, or Wasm file. Piston stores a copy
-            for analysis.
+            Choose an ELF, PE, Mach-O, or COFF file. Piston stores a copy for
+            analysis.
           </DialogDescription>
         </DialogHeader>
         <form
