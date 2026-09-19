@@ -1,6 +1,5 @@
 use crate::{config::Config, proto};
-use anyhow::{Context, Result, ensure};
-use sha2::{Digest, Sha256};
+use anyhow::Result;
 use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -45,33 +44,30 @@ impl Db {
         Ok(())
     }
     pub async fn import(&self, path: &Path, config: &Config) -> Result<proto::Binary> {
-        use object::Object;
-        ensure!(path.is_file(), "binary path must be a regular file");
-        // The copy is an immutable snapshot, so hashing and Ghidra always see the same bytes.
-        let bytes = tokio::fs::read(path).await.context("cannot read binary")?;
-        let file = object::File::parse(bytes.as_slice())
-            .context("unsupported binary: expected ELF, PE, Mach-O, COFF or Wasm")?;
-        let sha = hex::encode(Sha256::digest(&bytes));
-        if let Some(row) = sqlx::query("SELECT * FROM binaries WHERE sha256=?")
-            .bind(&sha)
-            .fetch_optional(&self.pool)
-            .await?
-        {
-            return Ok(binary_row(&row));
-        }
-        let id = uuid::Uuid::new_v4().to_string();
-        let folder = config.data_dir.join("binaries").join(&id);
-        tokio::fs::create_dir_all(&folder).await?;
-        let destination = folder.join("program.bin");
-        tokio::fs::write(&destination, &bytes).await?;
-        let destination = tokio::fs::canonicalize(destination).await?;
-        sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES(?,?,?,?,?,?,?,?)")
-            .bind(&id).bind(path.file_name().unwrap_or_default().to_string_lossy().as_ref()).bind(sha)
-            .bind(bytes.len() as i64).bind(format!("{:?}", file.architecture())).bind(format!("{:?}", file.format()))
-            .bind(destination.to_string_lossy().as_ref()).bind(config.ai.budget_usd).execute(&self.pool).await?;
-        self.event(&id, "info", "Binary imported. Immutable snapshot stored.")
+        let source = path.to_owned();
+        let root = config.data_dir.join("binaries");
+        let snapshot =
+            tokio::task::spawn_blocking(move || crate::snapshot::create(&source, &root)).await??;
+        let id = snapshot.id;
+        let mut tx = self.pool.begin().await?;
+        let inserted = sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING")
+            .bind(&id).bind(path.file_name().unwrap_or_default().to_string_lossy().as_ref()).bind(&snapshot.sha256)
+            .bind(snapshot.size).bind(&snapshot.architecture).bind(&snapshot.format)
+            .bind(snapshot.path.to_string_lossy().as_ref()).bind(config.ai.budget_usd).execute(&mut *tx).await?.rows_affected() == 1;
+        let row = sqlx::query("SELECT * FROM binaries WHERE sha256=?")
+            .bind(&snapshot.sha256)
+            .fetch_one(&mut *tx)
             .await?;
-        self.binary(&id).await
+        if inserted {
+            sqlx::query("INSERT INTO events(binary_id,level,message) VALUES(?,'info','Binary imported. Immutable snapshot stored.')")
+                .bind(&id).execute(&mut *tx).await?;
+            // Keep the durable file before COMMIT. Cancellation or an ambiguous
+            // commit must never delete a snapshot that SQLite may reference.
+            let _ = snapshot.directory.keep();
+        }
+        tx.commit().await?;
+        // A duplicate's temporary directory is removed automatically.
+        Ok(binary_row(&row))
     }
     pub async fn binary(&self, id: &str) -> Result<proto::Binary> {
         let row = sqlx::query("SELECT * FROM binaries WHERE id=?")
