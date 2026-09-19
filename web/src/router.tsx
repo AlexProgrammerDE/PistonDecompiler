@@ -2,12 +2,33 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
 } from "@tanstack/react-router"
 import { AppShell } from "@/components/AppShell"
-import { LibraryPage } from "@/pages/LibraryPage"
-import { BinaryPage, type BinaryView } from "@/pages/BinaryPage"
-import { SettingsPage } from "@/pages/SettingsPage"
-import { EmptyNotice, ErrorNotice } from "@/components/Feedback"
+import type { BinaryView } from "@/pages/BinaryPage"
+import {
+  EmptyNotice,
+  ErrorNotice,
+  LoadingRows,
+} from "@/components/Feedback"
+
+const LibraryPage = lazyRouteComponent(
+  () => import("@/pages/LibraryPage"),
+  "LibraryPage"
+)
+const BinaryPage = lazyRouteComponent(
+  () => import("@/pages/BinaryPage"),
+  "BinaryPage"
+)
+const SettingsPage = lazyRouteComponent(
+  () => import("@/pages/SettingsPage"),
+  "SettingsPage"
+)
+const PendingPage = () => (
+  <div className="page-body">
+    <LoadingRows />
+  </div>
+)
 const rootRoute = createRootRoute({
   component: AppShell,
   notFoundComponent: () => (
@@ -26,6 +47,7 @@ const library = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: LibraryPage,
+  pendingComponent: PendingPage,
 })
 const binary = createRoute({
   getParentRoute: () => rootRoute,
@@ -38,11 +60,13 @@ const binary = createRoute({
       : "functions",
   }),
   component: BinaryPage,
+  pendingComponent: PendingPage,
 })
 const settings = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: SettingsPage,
+  pendingComponent: PendingPage,
 })
 export const router = createRouter({
   routeTree: rootRoute.addChildren([library, binary, settings]),
