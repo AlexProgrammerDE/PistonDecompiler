@@ -39,6 +39,11 @@ impl Db {
         let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Reservation retained.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET status='interrupted',error='Extraction was interrupted. Resume to extract again.' WHERE status='extracting'").execute(&mut *tx).await?;
+        // Applying the same accepted name and comment again is idempotent. A
+        // stopped process cannot know whether Ghidra committed before exit.
+        sqlx::query("UPDATE results SET review='accepted' WHERE review='applying'")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE binaries SET paused=1 WHERE id IN (SELECT binary_id FROM jobs WHERE status='uncertain')").execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())

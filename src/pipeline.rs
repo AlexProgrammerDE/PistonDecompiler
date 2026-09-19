@@ -227,8 +227,11 @@ pub async fn control(db: &Db, ai: &Ai, binary: &str, action: &str) -> Result<()>
 pub async fn review(db: &Db, function: &str, accept: bool) -> Result<()> {
     let row = sqlx::query("SELECT id,review FROM results WHERE function_id=? ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1").bind(function).fetch_one(&db.pool).await?;
     ensure!(
-        row.get::<String, _>("review") != "applied",
-        "proposal is already applied"
+        !matches!(
+            row.get::<String, _>("review").as_str(),
+            "applying" | "applied"
+        ),
+        "proposal is being applied or is already applied"
     );
     sqlx::query("UPDATE results SET review=? WHERE id=?")
         .bind(if accept { "accepted" } else { "rejected" })

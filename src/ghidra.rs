@@ -300,13 +300,27 @@ async fn apply_inner(
     binary: &str,
     cancel: Option<CancellationToken>,
 ) -> Result<usize> {
-    let rows = sqlx::query("SELECT r.id,f.address,r.proposed_name,r.summary FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='accepted' AND r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)").bind(binary).fetch_all(&db.pool).await?;
-    ensure!(!rows.is_empty(), "no accepted proposals to apply");
+    let mut tx = db.pool.begin().await?;
+    let rows = sqlx::query("SELECT r.id,f.address,r.proposed_name,r.summary FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='accepted' AND r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)").bind(binary).fetch_all(&mut *tx).await?;
+    if rows.is_empty() {
+        tx.rollback().await?;
+        return Ok(0);
+    }
+    for row in &rows {
+        let changed =
+            sqlx::query("UPDATE results SET review='applying' WHERE id=? AND review='accepted'")
+                .bind(row.get::<String, _>("id"))
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        ensure!(changed == 1, "proposal review changed before writeback");
+    }
+    tx.commit().await?;
     let proposals: Vec<_> = rows.iter().map(|r| serde_json::json!({"address":r.get::<String,_>("address"),"name":r.get::<String,_>("proposed_name"),"summary":r.get::<String,_>("summary")})).collect();
     let folder = tokio::fs::canonicalize(config.data_dir.join("binaries").join(binary)).await?;
     let path = folder.join("accepted.json");
     tokio::fs::write(&path, serde_json::to_vec_pretty(&proposals)?).await?;
-    headless(
+    let result = headless(
         config,
         binary,
         &[
@@ -319,10 +333,21 @@ async fn apply_inner(
         ],
         cancel,
     )
-    .await?;
+    .await;
+    if let Err(error) = result {
+        let mut tx = db.pool.begin().await?;
+        for row in &rows {
+            sqlx::query("UPDATE results SET review='accepted' WHERE id=? AND review='applying'")
+                .bind(row.get::<String, _>("id"))
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        return Err(error);
+    }
     let mut tx = db.pool.begin().await?;
     for row in &rows {
-        sqlx::query("UPDATE results SET review='applied' WHERE id=?")
+        sqlx::query("UPDATE results SET review='applied' WHERE id=? AND review='applying'")
             .bind(row.get::<String, _>("id"))
             .execute(&mut *tx)
             .await?;
