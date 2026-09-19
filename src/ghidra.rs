@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -41,7 +42,35 @@ pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
     .await?;
     Ok(tokio::fs::canonicalize(dir).await?)
 }
-async fn headless(config: &Config, binary: &str, args: &[String]) -> Result<()> {
+async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        let _ = tokio::process::Command::new("kill")
+            .args(["-TERM", "--", &format!("-{pid}")])
+            .status()
+            .await;
+        if tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        let _ = tokio::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{pid}")])
+            .status()
+            .await;
+        let _ = child.wait().await;
+        return;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+async fn headless(
+    config: &Config,
+    binary: &str,
+    args: &[String],
+    cancel: Option<CancellationToken>,
+) -> Result<()> {
     let home = config
         .ghidra_home
         .as_ref()
@@ -70,34 +99,50 @@ async fn headless(config: &Config, binary: &str, args: &[String]) -> Result<()> 
     command.process_group(0);
     let mut child = command.spawn().context("cannot start Ghidra")?;
     let pid = child.id();
-    let status = tokio::time::timeout(
-        Duration::from_secs(config.ghidra_timeout_secs),
-        child.wait(),
-    )
-    .await;
-    if status.is_err() {
-        // analyzeHeadless is a launcher. Terminate its process group, including Java.
-        #[cfg(unix)]
-        if let Some(pid) = pid {
-            let _ = tokio::process::Command::new("kill")
-                .args(["-TERM", "--", &format!("-{pid}")])
-                .status()
-                .await;
+    let timeout = tokio::time::sleep(Duration::from_secs(config.ghidra_timeout_secs));
+    tokio::pin!(timeout);
+    let cancelled = async {
+        match cancel {
+            Some(cancel) => cancel.cancelled().await,
+            None => std::future::pending().await,
         }
-        child.kill().await.ok();
-        anyhow::bail!(
-            "Ghidra exceeded its time limit; see {}",
-            project.join("headless.log").display()
-        );
-    }
+    };
+    tokio::pin!(cancelled);
+    let status = tokio::select! {
+        status = child.wait() => status?,
+        () = &mut cancelled => {
+            terminate(&mut child, pid).await;
+            anyhow::bail!("Ghidra operation cancelled; see {}", project.join("headless.log").display());
+        }
+        () = &mut timeout => {
+            terminate(&mut child, pid).await;
+            anyhow::bail!("Ghidra exceeded its time limit; see {}", project.join("headless.log").display());
+        }
+    };
     ensure!(
-        status??.success(),
+        status.success(),
         "Ghidra failed; see {}",
         project.join("headless.log").display()
     );
     Ok(())
 }
 pub async fn extract(db: &Db, config: &Config, binary: &str) -> Result<()> {
+    extract_inner(db, config, binary, None).await
+}
+pub async fn extract_cancellable(
+    db: &Db,
+    config: &Config,
+    binary: &str,
+    cancel: CancellationToken,
+) -> Result<()> {
+    extract_inner(db, config, binary, Some(cancel)).await
+}
+async fn extract_inner(
+    db: &Db,
+    config: &Config,
+    binary: &str,
+    cancel: Option<CancellationToken>,
+) -> Result<()> {
     let row = sqlx::query("SELECT path,status FROM binaries WHERE id=?")
         .bind(binary)
         .fetch_one(&db.pool)
@@ -128,6 +173,7 @@ pub async fn extract(db: &Db, config: &Config, binary: &str) -> Result<()> {
                 "PistonExport.java".into(),
                 output.to_string_lossy().into_owned(),
             ],
+            cancel,
         )
         .await?;
         import_export(db, binary, &output).await
@@ -238,6 +284,22 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 pub async fn apply(db: &Db, config: &Config, binary: &str) -> Result<usize> {
+    apply_inner(db, config, binary, None).await
+}
+pub async fn apply_cancellable(
+    db: &Db,
+    config: &Config,
+    binary: &str,
+    cancel: CancellationToken,
+) -> Result<usize> {
+    apply_inner(db, config, binary, Some(cancel)).await
+}
+async fn apply_inner(
+    db: &Db,
+    config: &Config,
+    binary: &str,
+    cancel: Option<CancellationToken>,
+) -> Result<usize> {
     let rows = sqlx::query("SELECT r.id,f.address,r.proposed_name,r.summary FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? AND r.review='accepted' AND r.id=(SELECT id FROM results WHERE function_id=f.id ORDER BY CASE stage WHEN 'escalate' THEN 3 WHEN 'propagate' THEN 2 ELSE 1 END DESC LIMIT 1)").bind(binary).fetch_all(&db.pool).await?;
     ensure!(!rows.is_empty(), "no accepted proposals to apply");
     let proposals: Vec<_> = rows.iter().map(|r| serde_json::json!({"address":r.get::<String,_>("address"),"name":r.get::<String,_>("proposed_name"),"summary":r.get::<String,_>("summary")})).collect();
@@ -255,6 +317,7 @@ pub async fn apply(db: &Db, config: &Config, binary: &str) -> Result<usize> {
             "PistonApply.java".into(),
             path.to_string_lossy().into_owned(),
         ],
+        cancel,
     )
     .await?;
     let mut tx = db.pool.begin().await?;
@@ -272,4 +335,57 @@ pub async fn apply(db: &Db, config: &Config, binary: &str) -> Result<usize> {
     )
     .await?;
     Ok(rows.len())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn cancellation_terminates_the_headless_process_group() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("ghidra");
+        let support = home.join("support");
+        std::fs::create_dir_all(&support).unwrap();
+        let executable = support.join("analyzeHeadless");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nsleep 300 &\nchild=$!\necho \"$child\" > \"$1/child.pid\"\nwait \"$child\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = Config {
+            data_dir: directory.path().join("data"),
+            ghidra_home: Some(home),
+            ghidra_timeout_secs: 60,
+            ..Default::default()
+        };
+        let pid_path = config.data_dir.join("binaries/binary/ghidra/child.pid");
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let task =
+            tokio::spawn(async move { headless(&config, "binary", &[], Some(task_cancel)).await });
+        for _ in 0..100 {
+            if pid_path.is_file() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pid = std::fs::read_to_string(&pid_path).unwrap();
+        cancel.cancel();
+        let error = task.await.unwrap().unwrap_err().to_string();
+        assert!(error.contains("cancelled"));
+        let process = PathBuf::from(format!("/proc/{}", pid.trim()));
+        for _ in 0..100 {
+            if !process.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !process.exists(),
+            "headless child process survived cancellation"
+        );
+    }
 }

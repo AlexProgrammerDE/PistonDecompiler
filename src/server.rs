@@ -174,11 +174,22 @@ impl PistonService for Service {
             tokio::spawn(async move {
                 let _permit = permit;
                 let result = if r.action == "extract" {
-                    ghidra::extract(&service.db, &service.config, &r.binary_id).await
+                    ghidra::extract_cancellable(
+                        &service.db,
+                        &service.config,
+                        &r.binary_id,
+                        service.shutdown.clone(),
+                    )
+                    .await
                 } else {
-                    ghidra::apply(&service.db, &service.config, &r.binary_id)
-                        .await
-                        .map(|_| ())
+                    ghidra::apply_cancellable(
+                        &service.db,
+                        &service.config,
+                        &r.binary_id,
+                        service.shutdown.clone(),
+                    )
+                    .await
+                    .map(|_| ())
                 };
                 if let Err(error) = result {
                     let _ = service
