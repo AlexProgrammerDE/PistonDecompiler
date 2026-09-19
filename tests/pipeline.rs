@@ -199,3 +199,36 @@ async fn evidence_agent_uses_bounded_tools_and_accounts_all_rounds() {
     assert!(result.cost < ai.reservation("escalate", false));
     server.abort();
 }
+
+#[tokio::test]
+async fn prompt_packing_keeps_structured_evidence_within_escaped_budget() {
+    let (_dir, db, mut ai) = fixture().await;
+    let hostile = "\"\\\n\t\u{0001}日é".repeat(2_000);
+    sqlx::query("UPDATE functions SET pseudocode=?,name=?,strings_json=?,imports_json=?")
+        .bind(&hostile)
+        .bind(&hostile)
+        .bind(serde_json::to_string(&vec![&hostile; 30]).unwrap())
+        .bind(serde_json::to_string(&vec![&hostile; 30]).unwrap())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    for budget in [4096, 4097, 8192, 24000, 100000] {
+        ai.config.max_input_bytes = budget;
+        let prompt = ai.prompt(&db, "b:00000001", "map").await.unwrap();
+        assert!(serde_json::to_vec(&prompt.messages).unwrap().len() <= budget - 1024);
+        let context: serde_json::Value =
+            serde_json::from_str(prompt.messages[1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(context["address"], "00000001");
+        let code = context["pseudocode"].as_str().unwrap();
+        assert!(!code.is_empty());
+        assert!(hostile.starts_with(code));
+        assert!(context["strings"].is_array());
+        assert!(context["callees"].is_array());
+        assert_eq!(
+            prompt.hash,
+            ai.prompt(&db, "b:00000001", "map").await.unwrap().hash
+        );
+    }
+    ai.config.max_input_bytes = 1;
+    assert!(ai.prompt(&db, "b:00000001", "map").await.is_err());
+}
