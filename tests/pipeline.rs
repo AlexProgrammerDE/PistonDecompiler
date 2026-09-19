@@ -84,6 +84,11 @@ async fn completion_is_idempotent_and_propagation_waits_for_map() {
     assert_eq!(overview.analyzed, 1);
     assert_eq!(overview.input_tokens, 100);
     assert!(overview.reserved_usd.abs() < 1e-9);
+    assert_eq!(overview.provider_breakdowns.len(), 1);
+    assert_eq!(overview.provider_breakdowns[0].model, "fixture");
+    assert_eq!(overview.provider_breakdowns[0].stage, "map");
+    assert_eq!(overview.provider_breakdowns[0].requests, 1);
+    assert_eq!(overview.provider_breakdowns[0].average_latency_ms, 10.0);
     let next = pipeline::claim(&db, &ai, None, false)
         .await
         .unwrap()

@@ -218,6 +218,21 @@ impl Db {
         overview.usage = sqlx::query("SELECT strftime('%Y-%m-%d %H:00',r.created_at,'unixepoch') AS bucket,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,SUM(cost_usd) AS cost_usd,COUNT(*) AS requests FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY bucket ORDER BY bucket DESC LIMIT 48")
             .bind(id).fetch_all(&self.pool).await?.iter().map(|r| proto::UsagePoint { bucket: r.get("bucket"), input_tokens: r.get::<i64,_>("input_tokens") as u64, output_tokens: r.get::<i64,_>("output_tokens") as u64, cost_usd: r.get("cost_usd"), requests: r.get::<i64,_>("requests") as u32 }).collect();
         overview.usage.reverse();
+        overview.provider_breakdowns = sqlx::query("SELECT r.model,r.stage,COUNT(*) requests,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens,SUM(cost_usd) cost_usd,AVG(latency_ms) average_latency_ms FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY r.model,r.stage ORDER BY cost_usd DESC,r.model,r.stage")
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(|r| proto::ProviderBreakdown {
+                model: r.get("model"),
+                stage: r.get("stage"),
+                requests: r.get::<i64, _>("requests") as u32,
+                input_tokens: r.get::<i64, _>("input_tokens") as u64,
+                output_tokens: r.get::<i64, _>("output_tokens") as u64,
+                cost_usd: r.get("cost_usd"),
+                average_latency_ms: r.get("average_latency_ms"),
+            })
+            .collect();
         Ok(overview)
     }
 }

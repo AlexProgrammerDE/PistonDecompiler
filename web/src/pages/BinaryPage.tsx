@@ -297,6 +297,43 @@ export function BinaryPage() {
               ))}
             </TableBody>
           </Table>
+          <section>
+            <h2>Provider breakdown</h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Pass</TableHead>
+                  <TableHead>Requests</TableHead>
+                  <TableHead>Average latency</TableHead>
+                  <TableHead>Input / output</TableHead>
+                  <TableHead>Cost</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {o?.providerBreakdowns.map((item) => (
+                  <TableRow key={`${item.model}:${item.stage}`}>
+                    <TableCell className="font-mono">{item.model}</TableCell>
+                    <TableCell>{item.stage}</TableCell>
+                    <TableCell>{count(item.requests)}</TableCell>
+                    <TableCell>
+                      {Math.round(item.averageLatencyMs).toLocaleString()} ms
+                    </TableCell>
+                    <TableCell>
+                      {count(item.inputTokens)} / {count(item.outputTokens)}
+                    </TableCell>
+                    <TableCell>{money(item.costUsd)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {o?.providerBreakdowns.length === 0 ? (
+              <EmptyNotice
+                title="No completed provider requests"
+                description="Model latency and cost appear after analysis results are stored."
+              />
+            ) : null}
+          </section>
         </div>
       ) : null}
       {view === "events" ? <Events binaryId={binaryId} /> : null}
