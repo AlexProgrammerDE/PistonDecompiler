@@ -19,7 +19,7 @@ clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 fs2 = "0.4"
 hex = "0.4"
-object = "0.38"
+object = "0.40"
 petgraph = "0.8"
 prost = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "multipart"] }
