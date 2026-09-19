@@ -230,8 +230,7 @@ impl PistonService for Service {
         }))
     }
 }
-pub async fn serve(service: Service) -> Result<()> {
-    let addr: std::net::SocketAddr = service.config.listen.parse()?;
+pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Router> {
     ensure!(
         addr.ip().is_loopback(),
         "Piston currently supports loopback access only. Use an authenticated SSH tunnel for remote access."
@@ -240,6 +239,7 @@ pub async fn serve(service: Service) -> Result<()> {
         .max_decoding_message_size(128 * 1024 * 1024)
         .max_encoding_message_size(8 * 1024 * 1024);
     let grpc = tonic_web::GrpcWebLayer::new().layer(rpc);
+    let policy = crate::web_security::BrowserPolicy::new(addr, &service.config.browser_origins)?;
     let router = tonic::service::Routes::new(grpc)
         .into_axum_router()
         .route(
@@ -250,7 +250,16 @@ pub async fn serve(service: Service) -> Result<()> {
             tower_http::services::ServeDir::new(&service.config.web_dir).not_found_service(
                 tower_http::services::ServeFile::new(service.config.web_dir.join("index.html")),
             ),
-        );
+        )
+        .layer(axum::middleware::from_fn_with_state(
+            policy,
+            crate::web_security::guard,
+        ));
+    Ok(router)
+}
+pub async fn serve(service: Service) -> Result<()> {
+    let addr: std::net::SocketAddr = service.config.listen.parse()?;
+    let router = router(service.clone(), addr)?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr,"Piston gRPC-Web and frontend ready");
     let cancel = service.shutdown.clone();

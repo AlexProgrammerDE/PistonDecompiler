@@ -26,9 +26,16 @@ There is no guaranteed response time.
 - AI requests transmit selected decompiled code and related evidence to the configured provider.
 - SQLite, exports, and Ghidra projects can contain sensitive source material. Protect the data directory.
 
-Loopback binding does not replace authentication or browser-origin checks.
-The initial implementation still needs an origin and Host-header security review.
+The server accepts only its configured loopback address or `localhost`, with the configured port, in the request authority.
+It rejects browser origins outside its local origins and the explicit `browser_origins` list.
+Requests without an Origin header must have same-origin Fetch Metadata, user-navigation metadata, or no Fetch Metadata.
+These checks protect against DNS rebinding and requests from unrelated websites. They do not authenticate other local processes.
+Native clients can omit Origin and Fetch Metadata headers.
 Do not expose it through an unauthenticated proxy or use it as a multi-user service.
+
+For Vite development, add the exact development origin to `browser_origins`, such as `http://localhost:3000`.
+The Vite proxy rewrites Host for the backend and preserves Origin for validation.
+Keep this list empty for normal use through the Rust server.
 
 ## Cost boundaries
 

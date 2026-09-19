@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   server: {
     proxy: {
-      "/piston.v1.PistonService": "http://127.0.0.1:7070",
-      "/healthz": "http://127.0.0.1:7070",
+      "/piston.v1.PistonService": { target: "http://127.0.0.1:7070", changeOrigin: true },
+      "/healthz": { target: "http://127.0.0.1:7070", changeOrigin: true },
     },
   },
   build: { target: "es2022" },
