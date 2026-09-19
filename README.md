@@ -79,11 +79,14 @@ For a compatible asynchronous batch provider:
 piston batch submit BINARY_ID
 piston batch list
 piston batch collect BATCH_ID
+piston batch abandon BATCH_ID
 ```
 
 Enable `ai.batch_enabled` and verify the provider's endpoint behavior first.
 The current adapter uses `/files`, `/batches`, and a 24-hour completion window.
 A batch discount is never assumed. Configure `batch_price_multiplier` for your endpoint.
+`batch abandon` returns a batch that stopped during preparation to the queue.
+If submission started, inspect the provider first. Then use `--confirmed-not-submitted` only when no matching provider batch exists.
 
 ## Accounting and limitations
 

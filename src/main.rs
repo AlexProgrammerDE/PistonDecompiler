@@ -64,9 +64,22 @@ enum Command {
 }
 #[derive(Subcommand)]
 enum BatchCommand {
-    Submit { binary: String },
-    Collect { id: String },
-    Attach { id: String, remote: String },
+    Submit {
+        binary: String,
+    },
+    Collect {
+        id: String,
+    },
+    Attach {
+        id: String,
+        remote: String,
+    },
+    /// Return an abandoned batch to the queue. Inspect the provider first for uncertain submissions.
+    Abandon {
+        id: String,
+        #[arg(long)]
+        confirmed_not_submitted: bool,
+    },
     List,
 }
 #[tokio::main]
@@ -161,6 +174,10 @@ async fn main() -> Result<()> {
             }
             BatchCommand::Collect { id } => println!("{}", batch::collect(&db, &ai, &id).await?),
             BatchCommand::Attach { id, remote } => batch::attach(&db, &id, &remote).await?,
+            BatchCommand::Abandon {
+                id,
+                confirmed_not_submitted,
+            } => batch::abandon(&db, &id, confirmed_not_submitted).await?,
             BatchCommand::List => {
                 use sqlx::Row;
                 for row in

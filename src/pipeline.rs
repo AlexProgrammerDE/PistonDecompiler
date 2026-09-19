@@ -18,6 +18,18 @@ pub struct Job {
 }
 
 pub async fn claim(db: &Db, ai: &Ai, binary: Option<&str>, batch: bool) -> Result<Option<Job>> {
+    claim_inner(db, ai, binary, batch, None).await
+}
+pub async fn claim_batch(db: &Db, ai: &Ai, binary: &str, batch_id: &str) -> Result<Option<Job>> {
+    claim_inner(db, ai, Some(binary), true, Some(batch_id)).await
+}
+async fn claim_inner(
+    db: &Db,
+    ai: &Ai,
+    binary: Option<&str>,
+    batch: bool,
+    batch_id: Option<&str>,
+) -> Result<Option<Job>> {
     // One write statement claims a row. SQLite serializes competing writers.
     let mut tx = db.pool.begin().await?;
     let stage_filter = if batch { "AND j.stage='map'" } else { "" };
@@ -49,8 +61,34 @@ pub async fn claim(db: &Db, ai: &Ai, binary: Option<&str>, batch: bool) -> Resul
         .bind(&job.id)
         .execute(&mut *tx)
         .await?;
+    if let Some(batch_id) = batch_id {
+        sqlx::query("UPDATE jobs SET status='batched',batch_id=? WHERE id=?")
+            .bind(batch_id)
+            .bind(&job.id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     Ok(Some(job))
+}
+pub async fn fail_before_dispatch(db: &Db, ai: &Ai, job: &Job, error: &str) -> Result<()> {
+    let mut tx = db.pool.begin().await?;
+    let changed = sqlx::query("UPDATE jobs SET status=?,error=?,reserved_usd=0,batch_id=NULL,available_at=unixepoch(),updated_at=unixepoch() WHERE id=? AND status IN ('running','batched')")
+        .bind(if job.attempts < i64::from(ai.config.max_attempts) { "queued" } else { "failed" })
+        .bind(error)
+        .bind(&job.id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if changed > 0 {
+        sqlx::query("UPDATE binaries SET reserved_usd=MAX(0,reserved_usd-?) WHERE id=?")
+            .bind(job.reserved_usd)
+            .bind(&job.binary_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 pub async fn finish(db: &Db, ai: &Ai, job: &Job, completion: Completion) -> Result<()> {
     completion.analysis.validate()?;

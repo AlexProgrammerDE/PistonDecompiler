@@ -41,7 +41,7 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         hashes: HashMap::new(),
     };
     for _ in 0..ai.config.batch_size {
-        let Some(job) = pipeline::claim(db, ai, Some(binary), true).await? else {
+        let Some(job) = pipeline::claim_batch(db, ai, binary, &id).await? else {
             break;
         };
         match ai.prompt(db, &job.function_id, "map").await {
@@ -49,14 +49,9 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
                 lines.push_str(&serde_json::to_string(&json!({"custom_id":job.id,"method":"POST","url":"/v1/chat/completions","body":ai.body(&prompt.messages,"map",false)}))?);
                 lines.push('\n');
                 manifest.hashes.insert(job.id.clone(), prompt.hash);
-                sqlx::query("UPDATE jobs SET status='batched',batch_id=? WHERE id=?")
-                    .bind(&id)
-                    .bind(&job.id)
-                    .execute(&db.pool)
-                    .await?;
             }
             Err(error) => {
-                pipeline::fail(
+                pipeline::fail_before_dispatch(
                     db,
                     ai,
                     &job,
@@ -67,19 +62,20 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         }
     }
     pipeline::control(db, ai, binary, "pause").await?;
-    ensure!(
-        !manifest.hashes.is_empty(),
-        "no eligible map jobs fit the remaining budget"
-    );
+    if manifest.hashes.is_empty() {
+        sqlx::query("UPDATE batches SET status='abandoned' WHERE id=?")
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
+        anyhow::bail!("no eligible map jobs fit the remaining budget");
+    }
     tokio::fs::write(&path, lines.as_bytes()).await?;
     tokio::fs::write(
         path.with_extension("manifest.json"),
         serde_json::to_vec_pretty(&manifest)?,
     )
     .await?;
-    // Persist submission intent BEFORE the HTTP request. On ambiguous failure an
-    // operator attaches the remote ID, rather than submitting a second paid batch.
-    sqlx::query("UPDATE batches SET status='submitting' WHERE id=?")
+    sqlx::query("UPDATE batches SET status='uploading' WHERE id=?")
         .bind(&id)
         .execute(&db.pool)
         .await?;
@@ -90,6 +86,12 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         ensure!(response.status().is_success(), "batch file upload returned HTTP {}",response.status());
         let file: Value = response.json().await?;
         let file_id = file["id"].as_str().context("file upload omitted ID")?;
+        // Persist submission intent immediately before the request that can create
+        // paid work. A lost response requires provider inspection, not a retry.
+        sqlx::query("UPDATE batches SET status='submitting' WHERE id=?")
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
         let response = ai.client.post(ai.endpoint("batches")).bearer_auth(ai.key()?).json(&json!({"input_file_id":file_id,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"piston_batch_id":id}})).send().await?;
         ensure!(response.status().is_success(), "batch submission returned HTTP {}",response.status());
         let value: Value = response.json().await?;
@@ -99,7 +101,18 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         Ok(id.clone())
     }.await;
     if result.is_err() {
-        db.event(binary,"error",&format!("Batch {id} submission uncertain. Inspect provider metadata before attaching a remote ID or abandoning it.")).await?;
+        let status: String = sqlx::query_scalar("SELECT status FROM batches WHERE id=?")
+            .bind(&id)
+            .fetch_one(&db.pool)
+            .await?;
+        let message = if status == "submitting" {
+            format!(
+                "Batch {id} submission is uncertain. Inspect provider metadata before attaching a remote ID or abandoning it."
+            )
+        } else {
+            format!("Batch {id} stopped before submission. It can be abandoned safely.")
+        };
+        db.event(binary, "error", &message).await?;
     }
     result
 }
@@ -116,6 +129,51 @@ pub async fn attach(db: &Db, id: &str, remote: &str) -> Result<()> {
         changed == 1,
         "only uncertain submissions can attach a remote batch ID"
     );
+    Ok(())
+}
+pub async fn abandon(db: &Db, id: &str, confirmed_not_submitted: bool) -> Result<()> {
+    let mut tx = db.pool.begin().await?;
+    let row = sqlx::query("SELECT binary_id,status,remote_id FROM batches WHERE id=?")
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let binary: String = row.get("binary_id");
+    let status: String = row.get("status");
+    let remote: String = row.get("remote_id");
+    ensure!(
+        remote.is_empty() && matches!(status.as_str(), "preparing" | "uploading" | "submitting"),
+        "only an unsubmitted local batch or uncertain submitting batch can be abandoned"
+    );
+    ensure!(
+        matches!(status.as_str(), "preparing" | "uploading") || confirmed_not_submitted,
+        "inspect the provider first, then pass --confirmed-not-submitted for an uncertain submission"
+    );
+    let reserved: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(reserved_usd),0.0) FROM jobs WHERE batch_id=? AND status IN ('running','batched','uncertain')",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE jobs SET status='queued',attempts=MAX(0,attempts-1),reserved_usd=0,batch_id=NULL,available_at=0,error='',updated_at=unixepoch() WHERE batch_id=? AND status IN ('running','batched','uncertain')")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE binaries SET reserved_usd=MAX(0,reserved_usd-?) WHERE id=?")
+        .bind(reserved)
+        .bind(&binary)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE batches SET status='abandoned' WHERE id=?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    db.event(
+        &binary,
+        "warning",
+        &format!("Abandoned batch {id}. Its jobs returned to the queue."),
+    )
+    .await?;
     Ok(())
 }
 pub async fn collect(db: &Db, ai: &Ai, id: &str) -> Result<String> {
