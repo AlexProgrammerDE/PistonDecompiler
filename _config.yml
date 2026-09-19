@@ -1,0 +1,31 @@
+title: PistonDecompiler
+description: Persistent AI-assisted binary analysis with Ghidra, Rust, and a TanStack workbench.
+url: https://decompiler.pistonmaster.net
+baseurl: ""
+theme: jekyll-theme-hacker
+show_downloads: false
+repository: AlexProgrammerDE/PistonDecompiler
+exclude:
+  - src/
+  - tests/
+  - target/
+  - web/
+  - node_modules/
+  - data/
+  - proto/
+  - migrations/
+  - ghidra/
+  - fixtures/
+  - Cargo.toml
+  - Cargo.lock
+  - build.rs
+  - rust-toolchain.toml
+  - piston.example.toml
+  - piston.toml
+  - package.json
+  - bun.lock
+  - AGENTS.md
+  - docs/continuation.md
+  - CONTRIBUTING.md
+  - SECURITY.md
+  - LICENSE

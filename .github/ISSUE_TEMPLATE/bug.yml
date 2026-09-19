@@ -1,0 +1,21 @@
+name: Bug report
+description: Report a reproducible problem in PistonDecompiler.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include expected behavior and reproduction steps. Do not include secrets or private binaries.
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Revision or version
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Ghidra version, Java version, and provider name if relevant.

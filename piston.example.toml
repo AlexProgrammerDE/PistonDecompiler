@@ -1,0 +1,29 @@
+# Copy to piston.toml. Relative paths resolve from the working directory.
+data_dir = "data"
+listen = "127.0.0.1:7070"
+web_dir = "web/dist"
+# ghidra_home = "/opt/ghidra_12.1.3_PUBLIC"
+ghidra_timeout_secs = 7200
+
+[ai]
+# Use a chat-completions compatible provider. No model or price is assumed.
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "PISTON_AI_API_KEY"
+model = ""
+escalation_model = ""
+concurrency = 4
+budget_usd = 5.0
+# Required before paid work starts. Enter your actual endpoint's USD/1M rates.
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+escalation_input_usd_per_million = 0.0
+escalation_output_usd_per_million = 0.0
+max_input_bytes = 24000
+max_output_tokens = 1000
+confidence_threshold = 0.7
+max_attempts = 3
+request_timeout_secs = 120
+# Enable only when this provider supports /files and /batches.
+batch_enabled = false
+batch_price_multiplier = 1.0
+batch_size = 500

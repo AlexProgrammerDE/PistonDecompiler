@@ -1,0 +1,15 @@
+/target/
+/data/
+/piston.toml
+.env
+*.db
+*.db-shm
+*.db-wal
+web/node_modules/
+web/dist/
+web/.tanstack/
+node_modules/
+_site/
+.jekyll-cache/
+.bundle/
+vendor/
