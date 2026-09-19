@@ -62,9 +62,17 @@ export function FunctionTable({
               className="function-link"
               onClick={() => onSelect(info.row.original.id)}
             >
-              <span>{info.row.original.proposedName || info.getValue()}</span>
+              <span
+                className="block w-full truncate"
+                title={info.row.original.proposedName || info.getValue()}
+              >
+                {info.row.original.proposedName || info.getValue()}
+              </span>
               {info.row.original.proposedName ? (
-                <span className="text-xs text-muted-foreground">
+                <span
+                  className="block w-full truncate text-xs text-muted-foreground"
+                  title={info.getValue()}
+                >
                   {info.getValue()}
                 </span>
               ) : null}
@@ -133,7 +141,14 @@ export function FunctionTable({
         </select>
       </div>
       <ErrorNotice error={query.error} />
-      <Table>
+      <Table className="min-w-[640px] table-fixed">
+        <colgroup>
+          <col className="w-24" />
+          <col />
+          <col className="w-16" />
+          <col className="w-36" />
+          <col className="w-32" />
+        </colgroup>
         <TableHeader>
           {table.getHeaderGroups().map((group) => (
             <TableRow key={group.id}>

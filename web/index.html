@@ -1,9 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // Apply the saved shadcn theme before styles or React can paint.
+      let theme = "dark"
+      try {
+        const saved = localStorage.getItem("pistondecompiler-theme")
+        if (["light", "dark", "system"].includes(saved)) theme = saved
+      } catch {}
+      const resolved =
+        theme === "system"
+          ? matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light"
+          : theme
+      document.documentElement.className = resolved
+      document.documentElement.style.colorScheme = resolved
+    </script>
     <link rel="icon" type="image/svg+xml" href="/pistondecompiler.svg" />
     <title>PistonDecompiler | Binary analysis</title>
   </head>

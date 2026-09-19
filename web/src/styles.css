@@ -7,6 +7,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.153 0.006 107.1);
   --card: oklch(1 0 0);
@@ -42,6 +43,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.153 0.006 107.1);
   --foreground: oklch(0.988 0.003 106.5);
   --card: oklch(0.228 0.013 107.4);
@@ -394,9 +396,8 @@
     gap: 2px;
     text-align: left;
     font-family: monospace;
-    max-width: 260px;
-    overflow-wrap: anywhere;
-    white-space: normal;
+    width: 100%;
+    min-width: 0;
   }
   .function-link:hover {
     text-decoration: underline;

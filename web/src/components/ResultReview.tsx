@@ -288,7 +288,10 @@ export function ResultHistory({
       <ErrorNotice error={query.error} />
       {query.data?.results.map((result) => (
         <details key={result.id}>
-          <summary>
+          <summary
+            className="truncate"
+            title={`${result.proposedName} · ${result.author}`}
+          >
             {result.proposedName} · {result.author} ·{" "}
             {result.id === currentId ? "Current" : "Earlier or alternative"}
           </summary>

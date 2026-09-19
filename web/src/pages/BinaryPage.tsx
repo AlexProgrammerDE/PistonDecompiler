@@ -70,9 +70,11 @@ export function BinaryPage() {
   return (
     <>
       <header className="page-header">
-        <div>
+        <div className="w-full min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h1>{b?.name ?? "Binary analysis"}</h1>
+            <h1 className="min-w-0 truncate" title={b?.name}>
+              {b?.name ?? "Binary analysis"}
+            </h1>
             {b ? <Badge variant="outline">{b.status}</Badge> : null}
           </div>
           <p aria-live="polite">
@@ -86,7 +88,7 @@ export function BinaryPage() {
               : "Inspect indexed functions and analysis results."}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {canExtract ? (
             <Button
               disabled={mutation.isPending || !settings.data?.ghidraConfigured}
@@ -399,7 +401,11 @@ function Jobs({ binaryId }: { binaryId: string }) {
         <TableBody>
           {query.data?.jobs.map((job) => (
             <TableRow key={job.id}>
-              <TableCell className="font-mono">{job.name}</TableCell>
+              <TableCell className="font-mono">
+                <span className="block max-w-64 truncate" title={job.name}>
+                  {job.name}
+                </span>
+              </TableCell>
               <TableCell>{job.stage}</TableCell>
               <TableCell>{job.status}</TableCell>
               <TableCell>{job.attempts}</TableCell>

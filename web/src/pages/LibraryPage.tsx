@@ -48,7 +48,15 @@ export function LibraryPage() {
             <h2>Analysis projects</h2>
             <span>{binaries.data?.binaries.length ?? 0} projects</span>
           </div>
-          <Table>
+          <Table className="min-w-[760px] table-fixed">
+            <colgroup>
+              <col />
+              <col className="w-32" />
+              <col className="w-24" />
+              <col className="w-24" />
+              <col className="w-44" />
+              <col className="w-12" />
+            </colgroup>
             <TableHeader>
               <TableRow>
                 <TableHead>Binary</TableHead>
@@ -66,13 +74,14 @@ export function LibraryPage() {
                 <TableRow key={binary.id}>
                   <TableCell>
                     <Link
-                      className="file-link"
+                      className="file-link min-w-0"
+                      title={binary.name}
                       to="/binaries/$binaryId"
                       params={{ binaryId: binary.id }}
                       search={{ view: "functions" }}
                     >
-                      <FileCodeIcon size={18} />
-                      {binary.name}
+                      <FileCodeIcon size={18} className="shrink-0" />
+                      <span className="min-w-0 truncate">{binary.name}</span>
                     </Link>
                     <div className="mt-1 font-mono text-xs text-muted-foreground">
                       {binary.sha256.slice(0, 16)}

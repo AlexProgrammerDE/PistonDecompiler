@@ -240,7 +240,9 @@ function SavedFinding({
       <ErrorNotice error={query.error} />
       {query.data ? (
         <>
-          <h4>{query.data.proposedName}</h4>
+          <h4 className="truncate" title={query.data.proposedName}>
+            {query.data.proposedName}
+          </h4>
           <p>{query.data.summary}</p>
           <p>
             {query.data.stale

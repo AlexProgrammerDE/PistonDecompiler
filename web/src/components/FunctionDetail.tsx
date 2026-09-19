@@ -38,7 +38,9 @@ export function FunctionDetail({
       {detail && f ? (
         <div className="detail-content">
           <div>
-            <h3 className="font-mono break-all">{f.proposedName || f.name}</h3>
+            <h3 className="truncate font-mono" title={f.proposedName || f.name}>
+              {f.proposedName || f.name}
+            </h3>
             <p className="mt-1 text-muted-foreground">
               {f.module} · {f.callers} callers · {f.callees} callees
             </p>
@@ -102,9 +104,15 @@ export function FunctionDetail({
                       <ul className="reference-list">
                         {group.items.map((item) => (
                           <li key={item.id}>
-                            <button onClick={() => onSelect(item.id)}>
-                              <code>{item.address}</code>{" "}
-                              {item.proposedName || item.name}
+                            <button
+                              className="flex w-full min-w-0 items-center gap-2 text-left"
+                              title={item.proposedName || item.name}
+                              onClick={() => onSelect(item.id)}
+                            >
+                              <code className="shrink-0">{item.address}</code>
+                              <span className="min-w-0 truncate">
+                                {item.proposedName || item.name}
+                              </span>
                             </button>
                           </li>
                         ))}
