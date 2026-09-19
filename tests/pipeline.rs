@@ -237,3 +237,32 @@ async fn prompt_packing_keeps_structured_evidence_within_escaped_budget() {
     ai.config.max_input_bytes = 1;
     assert!(ai.prompt(&db, "b:00000001", "map").await.is_err());
 }
+
+#[tokio::test]
+async fn run_state_reports_remote_batch_blockers_without_hanging() {
+    let (_dir, db, _ai) = fixture().await;
+    assert_eq!(
+        pipeline::run_state(&db, "b").await.unwrap(),
+        pipeline::RunState::Work
+    );
+    sqlx::query("UPDATE jobs SET status='batched',batch_id='remote'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO jobs(id,binary_id,function_id,stage,status) VALUES('propagate','b','b:00000000','propagate','queued')")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        pipeline::run_state(&db, "b").await.unwrap(),
+        pipeline::RunState::BatchBlocked
+    );
+    sqlx::query("UPDATE jobs SET status='completed'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        pipeline::run_state(&db, "b").await.unwrap(),
+        pipeline::RunState::Complete
+    );
+}

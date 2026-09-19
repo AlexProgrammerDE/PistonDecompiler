@@ -17,6 +17,34 @@ pub struct Job {
     pub reserved_usd: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RunState {
+    Work,
+    Waiting,
+    BatchBlocked,
+    Complete,
+}
+
+pub async fn run_state(db: &Db, binary: &str) -> Result<RunState> {
+    let row = sqlx::query("SELECT COUNT(CASE WHEN j.status='running' THEN 1 END) active,COUNT(CASE WHEN j.status='batched' THEN 1 END) batched,COUNT(CASE WHEN j.status='queued' THEN 1 END) queued,COUNT(CASE WHEN j.status='queued' AND j.available_at<=unixepoch() AND (j.stage='map' OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) THEN 1 END) claimable FROM jobs j WHERE j.binary_id=?")
+        .bind(binary)
+        .fetch_one(&db.pool)
+        .await?;
+    let active = row.get::<i64, _>("active");
+    let batched = row.get::<i64, _>("batched");
+    let queued = row.get::<i64, _>("queued");
+    let claimable = row.get::<i64, _>("claimable");
+    Ok(if active > 0 || claimable > 0 {
+        RunState::Work
+    } else if batched > 0 {
+        RunState::BatchBlocked
+    } else if queued > 0 {
+        RunState::Waiting
+    } else {
+        RunState::Complete
+    })
+}
+
 pub async fn claim(db: &Db, ai: &Ai, binary: Option<&str>, batch: bool) -> Result<Option<Job>> {
     claim_inner(db, ai, binary, batch, None).await
 }

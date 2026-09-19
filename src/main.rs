@@ -157,8 +157,18 @@ async fn main() -> Result<()> {
             loop {
                 tokio::select! { _ = tokio::signal::ctrl_c() => break, () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {} }
                 let o = db.overview(&binary).await?;
-                if o.paused || o.queued + o.running == 0 {
+                if o.paused {
                     break;
+                }
+                match pipeline::run_state(&db, &binary).await? {
+                    pipeline::RunState::Work | pipeline::RunState::Waiting => {}
+                    pipeline::RunState::BatchBlocked => {
+                        eprintln!(
+                            "Local analysis is waiting for an asynchronous provider batch. Run `piston batch list`, then collect the completed batch."
+                        );
+                        break;
+                    }
+                    pipeline::RunState::Complete => break,
                 }
             }
             cancel.cancel();
