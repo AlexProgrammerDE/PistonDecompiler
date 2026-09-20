@@ -23,6 +23,10 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
         ai.config.batch_enabled,
         "enable ai.batch_enabled for a provider that supports /files and /batches"
     );
+    ensure!(
+        ai.config.decisions.is_none(),
+        "Decisions routing requires local workers, not provider batches"
+    );
     pipeline::control(db, ai, binary, "resume").await?;
     let id = uuid::Uuid::new_v4().to_string();
     let dir = config.data_dir.join("batches");

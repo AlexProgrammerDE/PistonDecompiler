@@ -26,7 +26,7 @@ pub enum RunState {
 }
 
 pub async fn run_state(db: &Db, binary: &str) -> Result<RunState> {
-    let row = sqlx::query("SELECT COUNT(CASE WHEN j.status='running' THEN 1 END) active,COUNT(CASE WHEN j.status='batched' THEN 1 END) batched,COUNT(CASE WHEN j.status='queued' THEN 1 END) queued,COUNT(CASE WHEN j.status='queued' AND j.available_at<=unixepoch() AND (j.stage='map' OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) THEN 1 END) claimable FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.binary_id=? AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id)")
+    let row = sqlx::query("SELECT COUNT(CASE WHEN j.status='running' THEN 1 END) active,COUNT(CASE WHEN j.status='batched' THEN 1 END) batched,COUNT(CASE WHEN j.status='queued' THEN 1 END) queued,COUNT(CASE WHEN j.status='queued' AND j.available_at<=unixepoch() AND (j.stage IN ('map','preprocess','verify_map','verify_escalate') OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) THEN 1 END) claimable FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.binary_id=? AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id)")
         .bind(binary)
         .fetch_one(&db.pool)
         .await?;
@@ -61,7 +61,7 @@ async fn claim_inner(
     // One write statement claims a row. SQLite serializes competing writers.
     let mut tx = db.pool.begin().await?;
     let stage_filter = if batch { "AND j.stage='map'" } else { "" };
-    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch() WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND (j.stage='map' OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts,reserved_usd"))
+    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch() WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND (j.stage IN ('map','preprocess','verify_map','verify_escalate') OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts,reserved_usd"))
         .bind(binary).bind(binary).fetch_optional(&mut *tx).await?;
     let Some(mut job) = row else {
         return Ok(None);
@@ -219,7 +219,25 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
             .execute(&mut *tx)
             .await?;
     }
-    // Further analysis is explicit and scoped; a completed map no longer automatically bills a second pass.
+    if let Ok(mut prompt) = serde_json::from_str::<crate::ai::Prompt>(&input_json)
+        && prompt.config.decisions.is_some()
+        && matches!(job.stage.as_str(), "map" | "escalate")
+    {
+        prompt.candidate = Some(serde_json::json!({"result_id":result_id,"revision":0,
+            "proposed_name":a.proposed_name,"summary":a.summary,"claims":a.claims,"parameter_types":a.parameter_types}));
+        crate::decisions::enqueue(
+            &mut tx,
+            job,
+            if job.stage == "map" {
+                "verify_map"
+            } else {
+                "verify_escalate"
+            },
+            &prompt,
+        )
+        .await?;
+    }
+    // Decision verification never accepts a proposal on the user's behalf.
     sqlx::query("INSERT OR IGNORE INTO investigation_findings(investigation_id,result_id) SELECT investigation_id,? FROM analysis_runs WHERE id=(SELECT run_id FROM jobs WHERE id=?) AND investigation_id IS NOT NULL")
         .bind(&result_id).bind(&job.id).execute(&mut *tx).await?;
     sqlx::query("UPDATE investigations SET revision=revision+1 WHERE id=(SELECT investigation_id FROM analysis_runs WHERE id=(SELECT run_id FROM jobs WHERE id=?))").bind(&job.id).execute(&mut *tx).await?;
@@ -269,8 +287,17 @@ pub async fn work(db: Db, ai: Arc<Ai>, cancel: CancellationToken) {
                 if cancel.is_cancelled() { break; }
                 match claim(&db,&ai,None,false).await {
                     Ok(Some(job)) => {
-                        let result = ai.analyze_job(&db,&job).await;
-                        let saved = match result { Ok(completion) => finish(&db,&ai,&job,completion).await, Err(error) => fail(&db,&ai,&job,&format!("{error:#}")).await };
+                        let saved = if crate::decisions::is_decision_stage(&job.stage) {
+                            match crate::decisions::analyze(&ai, &db, &job).await {
+                                Ok(completion) => crate::decisions::finish(&db, &job, completion).await,
+                                Err(error) => fail(&db, &ai, &job, &format!("{error:#}")).await,
+                            }
+                        } else {
+                            match ai.analyze_job(&db, &job).await {
+                                Ok(completion) => finish(&db, &ai, &job, completion).await,
+                                Err(error) => fail(&db, &ai, &job, &format!("{error:#}")).await,
+                            }
+                        };
                         if let Err(error) = saved { tracing::error!(%error,job=job.id,"Could not persist job outcome"); }
                     }
                     Ok(None) => { tokio::select! { () = cancel.cancelled() => break, () = tokio::time::sleep(Duration::from_secs(1)) => {} } }
@@ -289,6 +316,7 @@ pub async fn control(db: &Db, ai: &Ai, binary: &str, action: &str) -> Result<()>
     db.binary(binary).await?;
     match action {
         "resume" => {
+            crate::decisions::prepare(db, ai, binary).await?;
             ensure!(
                 ai.config.configured(),
                 "Configure an AI model, API key and nonzero token prices first"

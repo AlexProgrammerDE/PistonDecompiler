@@ -221,6 +221,11 @@ pub async fn reanalyze(
         stage != "escalate" || !config.escalation_model.is_empty(),
         "Configure an escalation model first"
     );
+    let stage = if stage == "map" && config.decisions.is_some() {
+        "preprocess"
+    } else {
+        stage
+    };
     let run = id();
     let mut tx = db.pool.begin().await?;
     let investigation = if r.investigation_id.is_empty() {

@@ -33,6 +33,16 @@ export function SettingsPage() {
               <dd className="break-all">{s.providerUrl}</dd>
               <dt>Map model</dt>
               <dd>{s.model || "Not configured"}</dd>
+              <dt>Decision model</dt>
+              <dd>{s.decisionModel || "Disabled"}</dd>
+              {s.decisionModel ? (
+                <>
+                  <dt>Decision endpoint</dt>
+                  <dd className="break-all">{s.decisionEndpoint}</dd>
+                  <dt>Routing threshold</dt>
+                  <dd>{s.decisionThreshold}</dd>
+                </>
+              ) : null}
               <dt>Escalation model</dt>
               <dd>{s.escalationModel || "Disabled"}</dd>
               <dt>Concurrent requests</dt>

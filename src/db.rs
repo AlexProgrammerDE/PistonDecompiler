@@ -161,6 +161,7 @@ impl Db {
         {
             detail.result = Some(crate::knowledge::result(self, &f.result_id).await?);
         }
+        detail.decisions = crate::decisions::records(self, id).await?;
         Ok(detail)
     }
     pub async fn overview(&self, id: &str) -> Result<proto::Overview> {
@@ -204,7 +205,14 @@ impl Db {
                 .unwrap_or_default(),
             ..Default::default()
         };
-        for stage in ["map", "propagate", "escalate"] {
+        for stage in [
+            "preprocess",
+            "map",
+            "verify_map",
+            "propagate",
+            "escalate",
+            "verify_escalate",
+        ] {
             let mut s = proto::Stage {
                 name: stage.into(),
                 ..Default::default()
@@ -223,10 +231,13 @@ impl Db {
             overview.failed += s.failed;
             overview.stages.push(s);
         }
-        overview.usage = sqlx::query("SELECT strftime('%Y-%m-%d %H:00',r.created_at,'unixepoch') AS bucket,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,SUM(cost_usd) AS cost_usd,COUNT(*) AS requests FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY bucket ORDER BY bucket DESC LIMIT 48")
+        overview.usage = sqlx::query("SELECT strftime('%Y-%m-%d %H:00',r.created_at,'unixepoch') AS bucket,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,SUM(cost_usd) AS cost_usd,COUNT(*) AS requests FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY bucket ORDER BY bucket DESC LIMIT 48")
             .bind(id).fetch_all(&self.pool).await?.iter().map(|r| proto::UsagePoint { bucket: r.get("bucket"), input_tokens: r.get::<i64,_>("input_tokens") as u64, output_tokens: r.get::<i64,_>("output_tokens") as u64, cost_usd: r.get("cost_usd"), requests: r.get::<i64,_>("requests") as u32 }).collect();
+        let decision_tokens: (i64, i64) = sqlx::query_as("SELECT COALESCE(SUM(d.input_tokens),0),COALESCE(SUM(d.output_tokens),0) FROM decisions d JOIN functions f ON f.id=d.function_id WHERE f.binary_id=?").bind(id).fetch_one(&self.pool).await?;
+        overview.input_tokens += decision_tokens.0 as u64;
+        overview.output_tokens += decision_tokens.1 as u64;
         overview.usage.reverse();
-        overview.provider_breakdowns = sqlx::query("SELECT r.model,r.stage,COUNT(*) requests,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens,SUM(cost_usd) cost_usd,AVG(latency_ms) average_latency_ms FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY r.model,r.stage ORDER BY cost_usd DESC,r.model,r.stage")
+        overview.provider_breakdowns = sqlx::query("SELECT r.model,r.stage,COUNT(*) requests,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens,SUM(cost_usd) cost_usd,AVG(latency_ms) average_latency_ms FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY r.model,r.stage ORDER BY cost_usd DESC,r.model,r.stage")
             .bind(id)
             .fetch_all(&self.pool)
             .await?

@@ -86,6 +86,8 @@ pub struct Prompt {
     pub config: AiConfig,
     pub dependencies: Vec<String>,
     pub evidence: Vec<SuppliedEvidence>,
+    #[serde(default)]
+    pub candidate: Option<serde_json::Value>,
 }
 impl Ai {
     pub fn new(config: AiConfig) -> Result<Self> {
@@ -97,6 +99,14 @@ impl Ai {
     }
     pub fn reservation(&self, stage: &str, batch: bool) -> f64 {
         let (input, output) = self.config.rates(stage);
+        if crate::decisions::is_decision_stage(stage) {
+            let max_bytes = self
+                .config
+                .decisions
+                .as_ref()
+                .map_or(self.config.max_input_bytes, |d| d.max_input_bytes);
+            return ((max_bytes + 8192) as f64 * input + 4096.0 * output) / 1_000_000.0;
+        }
         let rounds = if stage == "escalate" && !batch {
             4.0
         } else {
@@ -195,6 +205,7 @@ impl Ai {
             config: self.config.clone(),
             dependencies,
             evidence,
+            candidate: None,
         })
     }
     pub async fn pin_prompt(&self, db: &Db, job: &crate::pipeline::Job) -> Result<Prompt> {

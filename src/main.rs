@@ -51,6 +51,10 @@ enum Command {
     Status {
         binary: Option<String>,
     },
+    /// Inspect a function, its evidence, and durable decision assessments.
+    Inspect {
+        function: String,
+    },
     /// Pause, resume, or retry failed/uncertain jobs.
     Control {
         binary: String,
@@ -165,6 +169,10 @@ async fn run(cli: Cli) -> Result<()> {
             ),
             None => println!("{}", serde_json::to_string_pretty(&db.binaries().await?)?),
         },
+        Command::Inspect { function } => println!(
+            "{}",
+            serde_json::to_string_pretty(&db.function(&function).await?)?
+        ),
         Command::Control { binary, action } => {
             pipeline::control(&db, &ai, &binary, &action).await?
         }

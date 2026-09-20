@@ -8,7 +8,7 @@ Import a binary, index its functions and call graph, then run bounded AI analysi
 
 **Status: active development.** The workbench supports evidence review, corrections, scoped investigations, and previewed Ghidra writeback.
 Rust tests and a real Ghidra 12.1.3 extraction, apply, and re-export round trip passed on Linux.
-Paid provider behavior, model quality, and large-binary performance remain unmeasured.
+Model quality and large-binary performance remain unmeasured.
 
 ## What is implemented
 
@@ -16,9 +16,11 @@ Paid provider behavior, model quality, and large-binary performance remain unmea
 - Ghidra headless export of pseudocode, assembly, P-code, strings, imports, and call edges.
 - SQLite persistence, full-text function search, graph neighborhoods, and resumable jobs.
 - Bounded Tokio workers and Rig-powered AI requests with pinned inputs, dependency summaries, and read-only evidence tools.
+- Optional Jev preprocessing and candidate assessment through the OpenRouter Decisions API.
 - Immutable extraction artifacts, linked evidence, result history, and human corrections with downstream invalidation.
 - Saved investigations with questions, notes, findings, scope, and durable spending limits.
-- Live event replay, an interactive call graph, and Motion animations that respect reduced-motion preferences.
+- Live event replay, a Three.js call graph with a keyboard-accessible 2D view, and Motion transitions.
+- Tailwind animation utilities with reduced-motion support.
 - Configurable provider endpoints, prices, concurrency, context limits, and budget reservations.
 - Asynchronous batch submission, remote ID recovery, and idempotent result collection.
 - Per-field proposal review and exact change previews, with expected-value conflict checks and recoverable Ghidra apply operations.
@@ -63,12 +65,57 @@ bun run dev
 
 Vite serves port 3000 and proxies gRPC-Web to port 7070.
 
+## Jev preprocessing with OpenRouter
+
+Add this table to `pistondecompiler.toml` to enable decision routing:
+
+```toml
+[ai.decisions]
+endpoint = "https://openrouter.ai/api/alpha/decisions"
+model = "typesafe/jev-1.13"
+input_usd_per_million = 0.042
+output_usd_per_million = 0.0
+confidence_threshold = 0.95
+max_input_bytes = 96000
+```
+
+The decision client uses the same `ai.api_key_env` as generation.
+The Decisions endpoint differs from the chat-completions endpoint.
+Verify current prices in the [OpenRouter model catalog](https://openrouter.ai/typesafe/jev-1.13) before a large run.
+
+Each new analysis scope starts with `preprocess`.
+Jev classifies the function's role, evidence sufficiency, and complexity against pinned Ghidra evidence.
+
+- Sufficient or uncertain evidence routes to the configured generation model.
+- Strong evidence of missing context defers generation until you request another analysis.
+- Complex functions route to `ai.escalation_model` when that model is configured.
+- Generated proposals receive separate name, summary, and parameter-type assessments.
+- An uncertain initial proposal can trigger one escalation. The escalation assessment cannot trigger another escalation.
+
+Both confidence and the selected probability must meet the configured threshold for a decisive assessment.
+Missing confidence or probabilities never count as a passed check.
+The threshold is a routing policy, not a measured accuracy guarantee.
+Assessments never accept proposals or apply changes to Ghidra.
+
+Open **Assessments** in the function view to inspect these decisions.
+The `inspect FUNCTION_ID` command also includes requests, responses, evidence identity, usage, and routes.
+Each stage reserves its own budget before dispatch. Decisions use reported cost when available, otherwise configured token rates.
+
+On resume, untouched initial jobs enter preprocessing. Existing pinned jobs retain their original inputs.
+Tiny functions, thunks, and identical pseudocode retain separate identities and remain eligible for analysis.
+External functions and functions without exported code remain excluded from the initial queue.
+Provider batches cannot run with decision routing enabled.
+
+This integration covers static preprocessing, selective generation, and candidate assessment.
+Runtime trace ingestion, struct recovery, type writeback, and iterative re-decompilation remain future work.
+
 ## CLI
 
 ```bash
 pistondecompiler import /path/to/program --extract
 pistondecompiler status
 pistondecompiler status BINARY_ID
+pistondecompiler inspect FUNCTION_ID
 pistondecompiler run BINARY_ID
 pistondecompiler control BINARY_ID pause
 pistondecompiler control BINARY_ID retry
@@ -107,7 +154,7 @@ A valid citation proves that the referenced lines were supplied, not that the mo
 Accept or reject the name and summary separately. Each decision targets the result revision you inspected.
 A human correction creates a new result and marks dependent conclusions stale.
 Use **Reconsider stale findings** to queue affected functions, or explicitly request deeper evidence analysis.
-There is no automatic escalation or repeated convergence loop.
+With Jev enabled, uncertain proposals can trigger one configured escalation. Repeated convergence is not implemented.
 
 Preview accepted changes before applying them. The saved operation contains exact revisions, old values, and desired values.
 Ghidra reports conflicts when its current name or comment differs from both the expected and desired values.
@@ -118,7 +165,7 @@ Review is blocked for results in an unresolved apply operation.
 
 The executable is now `pistondecompiler`; the default configuration is `pistondecompiler.toml`.
 Rename an existing configuration or pass its path through `--config`.
-Remove the obsolete `confidence_threshold` setting and update the API-key variable if using the new default.
+Remove the obsolete top-level `ai.confidence_threshold` setting and update the API-key variable if using the new default.
 The existing data directory, database name, Ghidra project name, and Protobuf package remain compatible.
 SQLite migrations preserve old results. Legacy extraction provenance is explicitly marked unknown.
 The review and apply API requests changed; rebuild the frontend and backend together.

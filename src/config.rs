@@ -33,6 +33,29 @@ pub struct AiConfig {
     pub batch_enabled: bool,
     pub batch_price_multiplier: f64,
     pub batch_size: usize,
+    pub decisions: Option<DecisionConfig>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DecisionConfig {
+    pub endpoint: String,
+    pub model: String,
+    pub input_usd_per_million: f64,
+    pub output_usd_per_million: f64,
+    pub confidence_threshold: f64,
+    pub max_input_bytes: usize,
+}
+impl Default for DecisionConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "https://openrouter.ai/api/alpha/decisions".into(),
+            model: "typesafe/jev-1.13".into(),
+            input_usd_per_million: 0.042,
+            output_usd_per_million: 0.0,
+            confidence_threshold: 0.95,
+            max_input_bytes: 96000,
+        }
+    }
 }
 impl Default for Config {
     fn default() -> Self {
@@ -67,6 +90,7 @@ impl Default for AiConfig {
             batch_enabled: false,
             batch_price_multiplier: 1.0,
             batch_size: 500,
+            decisions: None,
         }
     }
 }
@@ -122,6 +146,36 @@ impl Config {
                 "prices must be finite and nonnegative"
             );
         }
+        if let Some(d) = &ai.decisions {
+            let endpoint =
+                reqwest::Url::parse(&d.endpoint).context("invalid Decisions endpoint")?;
+            ensure!(
+                matches!(endpoint.scheme(), "http" | "https"),
+                "invalid Decisions endpoint scheme"
+            );
+            ensure!(!d.model.trim().is_empty(), "configure a decision model");
+            ensure!(
+                (4096..=100000).contains(&d.max_input_bytes),
+                "decision max_input_bytes must be 4096..100000"
+            );
+            ensure!(
+                d.input_usd_per_million.is_finite()
+                    && d.input_usd_per_million > 0.0
+                    && d.output_usd_per_million.is_finite()
+                    && d.output_usd_per_million >= 0.0,
+                "decision prices must have positive input and nonnegative output rates"
+            );
+            ensure!(
+                d.confidence_threshold.is_finite()
+                    && d.confidence_threshold > 0.0
+                    && d.confidence_threshold <= 1.0,
+                "decision threshold must be in (0,1]"
+            );
+            ensure!(
+                !ai.batch_enabled,
+                "Decisions routing requires local workers; disable provider batches"
+            );
+        }
         Ok(config)
     }
 }
@@ -133,7 +187,11 @@ impl AiConfig {
             && self.output_usd_per_million > 0.0
     }
     pub fn rates(&self, stage: &str) -> (f64, f64) {
-        if stage == "escalate" {
+        if crate::decisions::is_decision_stage(stage)
+            && let Some(d) = &self.decisions
+        {
+            (d.input_usd_per_million, d.output_usd_per_million)
+        } else if stage == "escalate" {
             (
                 self.escalation_input_usd_per_million,
                 self.escalation_output_usd_per_million,
@@ -143,7 +201,11 @@ impl AiConfig {
         }
     }
     pub fn model_for(&self, stage: &str) -> &str {
-        if stage == "escalate" {
+        if crate::decisions::is_decision_stage(stage)
+            && let Some(d) = &self.decisions
+        {
+            &d.model
+        } else if stage == "escalate" {
             &self.escalation_model
         } else {
             &self.model

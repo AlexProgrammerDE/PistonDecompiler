@@ -61,7 +61,7 @@ message FunctionDetail {
   Function function = 1; string pseudocode = 2; repeated string strings = 3;
   repeated string imports = 4; repeated Function callers = 5; repeated Function callees = 6;
   string analysis_json = 7; string model = 8; string prompt_hash = 9;
-  string disassembly = 10; string pcode = 11; AnalysisResult result = 12;
+  string disassembly = 10; string pcode = 11; AnalysisResult result = 12; repeated DecisionRecord decisions = 13;
 }
 message Job { string id = 1; string function_id = 2; string name = 3; string stage = 4; string status = 5; uint32 attempts = 6; string error = 7; int64 updated_at = 8; double reserved_usd = 9; }
 message JobList { repeated Job jobs = 1; }
@@ -73,6 +73,7 @@ message Settings {
   bool ai_configured = 1; bool ghidra_configured = 2; string model = 3;
   string escalation_model = 4; uint32 concurrency = 5; double budget_usd = 6;
   uint32 max_input_bytes = 7; string provider_url = 8; bool batch_enabled = 9;
+  string decision_model = 10; string decision_endpoint = 11; double decision_threshold = 12;
 }
 
 message AnalysisResult {
@@ -98,3 +99,10 @@ message GraphEdge { string caller = 1; string callee = 2; }
 message Graph { repeated Function nodes = 1; repeated GraphEdge edges = 2; uint32 total = 3; }
 
 message ApplyOperationList { repeated ApplyOperation operations = 1; }
+
+message DecisionRecord {
+ string id = 1; string stage = 2; string model = 3; string route = 4;
+ string request_json = 5; string response_json = 6; string extraction_id = 7;
+ string prompt_hash = 8; uint64 input_tokens = 9; uint64 output_tokens = 10;
+ double cost_usd = 11; int64 created_at = 12;
+}

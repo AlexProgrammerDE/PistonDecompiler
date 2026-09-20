@@ -350,6 +350,20 @@ impl PistonService for Service {
             max_input_bytes: ai.max_input_bytes as u32,
             provider_url: ai.base_url.clone(),
             batch_enabled: ai.batch_enabled,
+            decision_model: ai
+                .decisions
+                .as_ref()
+                .map(|d| d.model.clone())
+                .unwrap_or_default(),
+            decision_endpoint: ai
+                .decisions
+                .as_ref()
+                .map(|d| d.endpoint.clone())
+                .unwrap_or_default(),
+            decision_threshold: ai
+                .decisions
+                .as_ref()
+                .map_or(0.0, |d| d.confidence_threshold),
         }))
     }
 }

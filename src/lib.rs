@@ -2,6 +2,7 @@ pub mod ai;
 pub mod batch;
 pub mod config;
 pub mod db;
+pub mod decisions;
 pub mod ghidra;
 pub mod graph;
 pub mod knowledge;

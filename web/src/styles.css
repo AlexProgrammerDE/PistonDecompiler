@@ -180,81 +180,6 @@
   }
 }
 @layer components {
-  .app-shell {
-    display: grid;
-    grid-template-columns: 260px minmax(0, 1fr);
-    min-height: 100dvh;
-  }
-  .sidebar {
-    display: flex;
-    flex-direction: column;
-    padding: 20px 12px 12px;
-    background: var(--sidebar);
-    border-right: 1px solid var(--border);
-    gap: 20px;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 10px 12px;
-    font-family: var(--font-heading);
-    font-size: 21px;
-    font-weight: 600;
-  }
-  .sidebar nav {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .nav-link {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    min-height: 36px;
-    border-radius: 5px;
-    padding: 7px 10px;
-    font-size: 13px;
-    color: var(--muted-foreground);
-  }
-  .nav-link svg {
-    flex-shrink: 0;
-    width: 18px;
-    height: 18px;
-  }
-  .nav-link:hover,
-  .nav-link[data-status="active"] {
-    background: var(--sidebar-accent);
-    color: var(--sidebar-foreground);
-  }
-  .sidebar-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 10px;
-    margin-bottom: -12px;
-  }
-  .sidebar-heading h2 {
-    font-size: 12px;
-    color: var(--muted-foreground);
-    font-family: var(--font-sans);
-    font-weight: 500;
-  }
-  .project-list {
-    flex: 1;
-  }
-  .sidebar-bottom {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 10px 0;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--muted-foreground);
-  }
-  .main-content {
-    min-width: 0;
-  }
   .page-header {
     display: flex;
     align-items: center;
@@ -520,39 +445,6 @@
   }
 }
 @media (max-width: 760px) {
-  .app-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .sidebar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .brand {
-    padding: 0;
-    font-size: 20px;
-  }
-  .sidebar nav {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex-direction: row;
-  }
-  .sidebar .project-list,
-  .sidebar-heading,
-  .sidebar-bottom > span {
-    display: none;
-  }
-  .sidebar-bottom {
-    grid-column: 2;
-    grid-row: 1;
-    margin-left: auto;
-    padding: 0;
-    border: 0;
-  }
   .page-header {
     padding: 20px 16px;
     align-items: flex-start;

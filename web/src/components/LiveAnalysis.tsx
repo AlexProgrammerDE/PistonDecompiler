@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react"
+import { lazy, Suspense, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { motion, useReducedMotion } from "motion/react"
 import { api, invalidateBinary, jobsQuery, eventsQuery } from "@/lib/api"
-import { ErrorNotice } from "@/components/Feedback"
+import { ErrorNotice, LoadingRows } from "@/components/Feedback"
 import { Badge } from "@/components/ui/badge"
 import { dateTime } from "@/lib/format"
+
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+
+const CallGraph3D = lazy(() => import("@/components/CallGraph3D"))
 
 export function useLiveAnalysis(binaryId: string) {
   const [connected, setConnected] = useState(false)
@@ -52,10 +56,14 @@ export function LiveAnalysis({
       ),
     [graph.data]
   )
-  const running = new Set(
-    jobs.data?.jobs
-      .filter((job) => job.status === "running")
-      .map((job) => job.functionId)
+  const running = useMemo(
+    () =>
+      new Set(
+        jobs.data?.jobs
+          .filter((job) => job.status === "running")
+          .map((job) => job.functionId)
+      ),
+    [jobs.data]
   )
   const height = Math.max(
     150,
@@ -69,78 +77,106 @@ export function LiveAnalysis({
       </div>
       <p>
         Call relationships for {graph.data?.nodes.length ?? 0} of{" "}
-        {graph.data?.total ?? 0} functions. Select a node to inspect it. Pulses
-        indicate active requests; outlined nodes need reconsideration.
+        {graph.data?.total ?? 0} functions. Select a node to inspect its
+        evidence and assessments.
       </p>
       <ErrorNotice error={graph.error ?? jobs.error ?? events.error} />
-      <div className="graph-scroll">
-        <svg
-          viewBox={`0 0 900 ${height}`}
-          role="group"
-          aria-label="Live function call graph"
-          className="function-graph"
+      <Tabs defaultValue="3d">
+        <TabsList variant="line" aria-label="Graph view">
+          <TabsTrigger value="3d">3D graph</TabsTrigger>
+          <TabsTrigger value="2d">2D graph</TabsTrigger>
+        </TabsList>
+        <TabsContent
+          value="3d"
+          className="motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0"
         >
-          {graph.data?.edges.map((edge) => {
-            const from = positions.get(edge.caller)
-            const to = positions.get(edge.callee)
-            return from && to ? (
-              <path
-                key={`${edge.caller}:${edge.callee}`}
-                d={`M${from.x},${from.y} Q${from.x},${to.y} ${to.x},${to.y}`}
-                fill="none"
-                stroke="var(--muted-foreground)"
-                strokeOpacity={0.45}
+          {graph.data ? (
+            <Suspense fallback={<LoadingRows />}>
+              <CallGraph3D
+                graph={graph.data}
+                running={running}
+                onSelect={onSelect}
               />
-            ) : null
-          })}
-          {graph.data?.nodes.map((node) => {
-            const pos = positions.get(node.id)!
-            const active = running.has(node.id)
-            return (
-              <g
-                key={node.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`${node.proposedName || node.name}${active ? ", analyzing" : ""}`}
-                onClick={() => onSelect(node.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault()
-                    onSelect(node.id)
-                  }
-                }}
-                className="graph-node"
-              >
-                <title>{node.proposedName || node.name}</title>
-                <motion.circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={8}
-                  fill={
-                    node.resultId ? "var(--primary)" : "var(--muted-foreground)"
-                  }
-                  stroke={node.stale ? "var(--foreground)" : "none"}
-                  strokeWidth={3}
-                  animate={{ opacity: active && !reduced ? [1, 0.35, 1] : 1 }}
-                  transition={{
-                    duration: 1.4,
-                    repeat: active && !reduced ? Infinity : 0,
-                  }}
-                />
-                <text
-                  x={pos.x}
-                  y={pos.y + 22}
-                  textAnchor="middle"
-                  fill="var(--muted-foreground)"
-                  fontSize={9}
-                >
-                  {node.address.slice(-8)}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-      </div>
+            </Suspense>
+          ) : (
+            <LoadingRows />
+          )}
+        </TabsContent>
+        <TabsContent value="2d">
+          <div className="graph-scroll">
+            <svg
+              viewBox={`0 0 900 ${height}`}
+              role="group"
+              aria-label="Live function call graph"
+              className="function-graph"
+            >
+              {graph.data?.edges.map((edge) => {
+                const from = positions.get(edge.caller)
+                const to = positions.get(edge.callee)
+                return from && to ? (
+                  <path
+                    key={`${edge.caller}:${edge.callee}`}
+                    d={`M${from.x},${from.y} Q${from.x},${to.y} ${to.x},${to.y}`}
+                    fill="none"
+                    stroke="var(--muted-foreground)"
+                    strokeOpacity={0.45}
+                  />
+                ) : null
+              })}
+              {graph.data?.nodes.map((node) => {
+                const pos = positions.get(node.id)!
+                const active = running.has(node.id)
+                return (
+                  <g
+                    key={node.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${node.proposedName || node.name}${active ? ", analyzing" : ""}`}
+                    onClick={() => onSelect(node.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        onSelect(node.id)
+                      }
+                    }}
+                    className="graph-node"
+                  >
+                    <title>{node.proposedName || node.name}</title>
+                    <motion.circle
+                      cx={pos.x}
+                      cy={pos.y}
+                      r={8}
+                      fill={
+                        node.resultId
+                          ? "var(--primary)"
+                          : "var(--muted-foreground)"
+                      }
+                      stroke={node.stale ? "var(--foreground)" : "none"}
+                      strokeWidth={3}
+                      animate={{
+                        opacity: active && !reduced ? [1, 0.35, 1] : 1,
+                      }}
+                      transition={{
+                        duration: 1.4,
+                        repeat: active && !reduced ? Infinity : 0,
+                      }}
+                    />
+                    <text
+                      x={pos.x}
+                      y={pos.y + 22}
+                      textAnchor="middle"
+                      fill="var(--muted-foreground)"
+                      fontSize={9}
+                    >
+                      {node.address.slice(-8)}
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+          </div>
+        </TabsContent>
+      </Tabs>
       <h3>Activity log</h3>
       <ol className="event-list">
         {events.data?.events.slice(0, 40).map((event) => (

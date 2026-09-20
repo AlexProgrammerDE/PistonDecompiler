@@ -209,7 +209,6 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
     let _: serde_json::Value = serde_json::from_str(&metadata)?;
     let mut addresses = HashMap::new();
     let mut pending_edges = Vec::new();
-    let mut fingerprints = HashSet::new();
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
             continue;
@@ -223,14 +222,8 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         let fingerprint = hex::encode(Sha256::digest(f.pseudocode.as_bytes()));
         let skip = if f.external {
             "external"
-        } else if f.thunk {
-            "thunk"
-        } else if f.pseudocode.is_empty() {
-            "decompilation unavailable"
-        } else if f.size < 8 {
-            "tiny function"
-        } else if !fingerprints.insert(fingerprint.clone()) {
-            "identical pseudocode"
+        } else if f.pseudocode.is_empty() && f.disassembly.is_empty() {
+            "code unavailable"
         } else {
             ""
         };

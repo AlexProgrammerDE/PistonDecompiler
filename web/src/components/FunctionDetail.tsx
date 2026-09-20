@@ -1,3 +1,4 @@
+import { motion, useReducedMotion } from "motion/react"
 import { ResultReview, ResultHistory } from "@/components/ResultReview"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
@@ -13,6 +14,7 @@ export function FunctionDetail({
   binaryId: string
   onSelect: (id: string) => void
 }) {
+  const reduced = useReducedMotion()
   const query = useQuery({
     queryKey: ["function", id],
     queryFn: ({ signal }) => api.getFunction({ id }, { signal }),
@@ -71,6 +73,7 @@ export function FunctionDetail({
               <TabsTrigger value="references">References</TabsTrigger>
               <TabsTrigger value="assembly">Assembly</TabsTrigger>
               <TabsTrigger value="analysis">Analysis</TabsTrigger>
+              <TabsTrigger value="decisions">Assessments</TabsTrigger>
             </TabsList>
             <TabsContent value="code">
               <pre className="code-view">
@@ -134,6 +137,57 @@ export function FunctionDetail({
                     {detail.imports.join("\n") || "None"}
                   </pre>
                 </section>
+              </div>
+            </TabsContent>
+            <TabsContent
+              value="decisions"
+              className="motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in-0"
+            >
+              <div className="flex flex-col gap-4">
+                <p className="text-muted-foreground">
+                  Model assessments guide analysis. They do not approve changes
+                  to Ghidra.
+                </p>
+                {detail.decisions.length === 0 ? (
+                  <p>No assessments yet.</p>
+                ) : (
+                  detail.decisions.map((decision) => (
+                    <motion.section
+                      key={decision.id}
+                      initial={reduced ? false : { opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.18 }}
+                      className="flex flex-col gap-2"
+                    >
+                      <h4>{decision.stage.replaceAll("_", " ")}</h4>
+                      <p>
+                        {decision.route === "superseded"
+                          ? "The proposal changed or was reviewed. No further work was queued."
+                          : decision.route === "defer"
+                            ? "Deferred: gather more evidence before reanalysis."
+                            : decision.route === "needs_review"
+                              ? "Uncertain proposal: review the evidence."
+                              : decision.route === "review"
+                                ? "Checks passed. Human review is still required."
+                                : decision.route === "escalate"
+                                  ? "Routed to the escalation model."
+                                  : "Routed to the generation model."}
+                      </p>
+                      <p className="break-all text-muted-foreground">
+                        {decision.model}
+                      </p>
+                      <pre className="code-view">
+                        <code>
+                          {JSON.stringify(
+                            JSON.parse(decision.responseJson).answers,
+                            null,
+                            2
+                          )}
+                        </code>
+                      </pre>
+                    </motion.section>
+                  ))
+                )}
               </div>
             </TabsContent>
             <TabsContent value="analysis">
