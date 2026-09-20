@@ -477,7 +477,6 @@ pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Rout
         .max_decoding_message_size(128 * 1024 * 1024)
         .max_encoding_message_size(8 * 1024 * 1024);
     let grpc = tonic_web::GrpcWebLayer::new().layer(rpc);
-    let policy = crate::web_security::BrowserPolicy::new(addr, &service.config.browser_origins)?;
     let router = tonic::service::Routes::new(grpc)
         .into_axum_router()
         .route(
@@ -493,9 +492,8 @@ pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Rout
                 tower_http::services::ServeFile::new(service.config.web_dir.join("index.html")),
             ),
         )
-        .layer(axum::middleware::from_fn_with_state(
-            policy,
-            crate::web_security::guard,
+        .layer(axum::middleware::map_response(
+            crate::web_security::response_headers,
         ));
     Ok(router)
 }

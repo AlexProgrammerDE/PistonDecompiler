@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn browser_boundary_protects_rpc_and_static_content() {
+async fn browser_metadata_does_not_block_static_or_rpc_requests() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("index.html"),
@@ -23,7 +23,6 @@ async fn browser_boundary_protects_rpc_and_static_content() {
     let db = Db::open(&dir.path().join("test.db")).await.unwrap();
     let config = Config {
         web_dir: dir.path().into(),
-        browser_origins: vec!["http://localhost:3000".into()],
         ..Default::default()
     };
     let app = server::router(
@@ -37,54 +36,20 @@ async fn browser_boundary_protects_rpc_and_static_content() {
         "127.0.0.1:7070".parse().unwrap(),
     )
     .unwrap();
-
-    for path in ["/healthz", "/", "/piston.v1.PistonService/ListBinaries"] {
-        for (host, origin, site, permitted) in [
-            ("127.0.0.1:7070", None, None, true),
-            (
-                "localhost:7070",
-                Some("http://localhost:7070"),
-                Some("same-origin"),
-                true,
-            ),
-            (
-                "127.0.0.1:7070",
-                Some("http://localhost:3000"),
-                Some("same-site"),
-                true,
-            ),
-            ("attacker.example:7070", None, None, false),
-            ("localhost:9999", None, None, false),
-            (
-                "localhost:7070",
-                Some("https://attacker.example"),
-                Some("cross-site"),
-                false,
-            ),
-            ("localhost:7070", Some("null"), None, false),
-            (
-                "localhost:7070",
-                Some("http://localhost:4000"),
-                Some("same-site"),
-                false,
-            ),
-            ("localhost:7070", None, Some("cross-site"), false),
-            ("localhost:7070", None, Some("same-site"), false),
-        ] {
-            let mut request = Request::builder().uri(path).header("host", host);
+    for path in ["/", "/healthz", "/piston.v1.PistonService/ListBinaries"] {
+        for origin in [None, Some("null"), Some("https://browser.example")] {
+            let rpc = path.starts_with("/piston.");
+            let mut request = Request::builder()
+                .uri(path)
+                .header("host", "proxy.example:9000")
+                .header("sec-fetch-site", "cross-site");
             if let Some(origin) = origin {
                 request = request.header("origin", origin);
             }
-            if let Some(site) = site {
-                request = request.header("sec-fetch-site", site);
-            }
-            let rpc = path.starts_with("/piston.");
-            if rpc {
+            let body = if rpc {
                 request = request
                     .method("POST")
                     .header("content-type", "application/grpc-web+proto");
-            }
-            let body = if rpc {
                 Body::from(vec![0u8; 5])
             } else {
                 Body::empty()
@@ -96,54 +61,20 @@ async fn browser_boundary_protects_rpc_and_static_content() {
                 .unwrap();
             assert_eq!(
                 response.status(),
-                if permitted {
-                    if path == "/healthz" {
-                        StatusCode::NO_CONTENT
-                    } else {
-                        StatusCode::OK
-                    }
+                if path == "/healthz" {
+                    StatusCode::NO_CONTENT
                 } else {
-                    StatusCode::FORBIDDEN
-                },
-                "{path} {host} {origin:?} {site:?}"
+                    StatusCode::OK
+                }
             );
-            if rpc && permitted {
+            assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+            if rpc {
                 assert_eq!(
                     response.headers()["content-type"],
                     "application/grpc-web+proto"
                 );
-                let body = axum::body::to_bytes(response.into_body(), 1024)
-                    .await
-                    .unwrap();
-                assert!(!body.is_empty());
             }
         }
-    }
-    for request in [
-        Request::builder().uri("/").body(Body::empty()).unwrap(),
-        Request::builder()
-            .uri("/")
-            .header("host", "localhost:7070")
-            .header("host", "attacker.example")
-            .body(Body::empty())
-            .unwrap(),
-        Request::builder()
-            .uri("/")
-            .header("host", "localhost:7070")
-            .header("origin", "http://localhost:7070")
-            .header("origin", "https://attacker.example")
-            .body(Body::empty())
-            .unwrap(),
-        Request::builder()
-            .uri("http://attacker.example/")
-            .header("host", "localhost:7070")
-            .body(Body::empty())
-            .unwrap(),
-    ] {
-        assert_eq!(
-            app.clone().oneshot(request).await.unwrap().status(),
-            StatusCode::FORBIDDEN
-        );
     }
 }
 
