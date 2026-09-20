@@ -92,8 +92,38 @@ async fn native_parameter_trials_preserve_return_and_reconcile_saved_winners() {
     let after: Value = serde_json::from_str(&after).unwrap();
     assert_eq!(before["return_type"], after["return_type"]);
     assert_eq!(before["calling_convention"], after["calling_convention"]);
+    // Simulate Ghidra resolving an unknown convention after saving a legacy marker.
+    let scripts = ghidra::install_scripts(&config).await.unwrap();
+    std::fs::write(scripts.join("ResolveConvention.java"),r#"import ghidra.app.script.GhidraScript;
+import com.google.gson.*;
+public class ResolveConvention extends GhidraScript {
+ public void run() throws Exception {
+  var options=currentProgram.getOptions("PistonDecompiler");
+  var report=JsonParser.parseString(options.getString("test-parameters", "")).getAsJsonObject();
+  var function=getFunctionAt(toAddr(report.get("address").getAsString()));
+  function.setCallingConvention(currentProgram.getCompilerSpec().getDefaultCallingConvention().getName());
+  String[] state=report.get("state").getAsString().split("\\|",-1);state[1]="unknown";
+  report.addProperty("state",String.join("|",state));options.setString("test-parameters",report.toString());
+ }
+}"#).unwrap();
+    ghidra::headless(
+        &config,
+        &b.id,
+        &[
+            "-process".into(),
+            "program.bin".into(),
+            "-noanalysis".into(),
+            "-postScript".into(),
+            "ResolveConvention.java".into(),
+        ],
+        None,
+    )
+    .await
+    .unwrap();
     // A new process reopens the saved project and returns the same audit without trials.
     ghidra::headless(&config, &b.id, &args, None).await.unwrap();
     let second: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
-    assert_eq!(first, second);
+    assert_eq!(first["trials"], second["trials"]);
+    assert_eq!(first["coverage_after"], second["coverage_after"]);
+    assert_eq!(first["changed"], second["changed"]);
 }

@@ -165,17 +165,31 @@ public class PistonParameters extends GhidraScript {
         // Replacing parameters preserves the return type, function identity and convention.
         f.replaceParameters(Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS,true,SourceType.ANALYSIS,values.toArray(new Variable[0]));
     }
+    private String effectiveConvention(String convention) {
+        if(convention==null || convention.equals("unknown") || convention.equals("default"))
+            return workingProgram.getCompilerSpec().getDefaultCallingConvention().getName();
+        return convention;
+    }
     private String state(Function f) {
-        StringBuilder state=new StringBuilder(f.getPrototypeString(true,true)).append('|').append(f.getCallingConventionName()).append('|').append(f.hasVarArgs());
+        StringBuilder state=new StringBuilder(f.getPrototypeString(true,false)).append('|').append(effectiveConvention(f.getCallingConventionName())).append('|').append(f.hasVarArgs());
         for(var p:f.getParameters()) state.append('|').append(p.getName()).append(':').append(p.getDataType().getPathName()).append(':').append(p.getVariableStorage());
         return state.toString();
+    }
+    private String canonicalSavedState(String saved) {
+        String[] parts=saved.split("\\|",-1);
+        if(parts.length<3) return saved;
+        // Older markers included the convention twice and recorded "unknown"
+        // even when parameter storage already used the compiler's default ABI.
+        parts[0]=parts[0].replace(" "+parts[1]+" "," ");
+        parts[1]=effectiveConvention(parts[1]);
+        return String.join("|",parts);
     }
     public void verifyApplied() throws Exception {
         workingProgram=currentProgram;
         var args=getScriptArgs();var options=workingProgram.getOptions("PistonDecompiler");
         var report=JsonParser.parseString(options.getString(args[0],"{}")).getAsJsonObject();
-        if(!report.has("state") || !report.get("state").getAsString().equals(state(function(toAddr(report.get("address").getAsString())))))
-            throw new IllegalStateException("Saved parameter state differs from the operation");
+        if(!report.has("state") || !canonicalSavedState(report.get("state").getAsString()).equals(state(function(toAddr(report.get("address").getAsString())))))
+            throw new IllegalStateException("Saved parameter state differs from the operation: expected "+report.get("state")+"; actual "+state(function(toAddr(report.get("address").getAsString()))));
     }
     @Override public void run() throws Exception {
         workingProgram=currentProgram;
