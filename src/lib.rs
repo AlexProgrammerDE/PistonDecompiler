@@ -27,3 +27,7 @@ pub mod progress;
 pub mod desktop;
 
 pub mod recording;
+
+pub mod automatic;
+
+pub mod cpp;

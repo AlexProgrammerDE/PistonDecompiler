@@ -1,6 +1,6 @@
 import { useState } from "react"
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { api, invalidateBinary } from "@/lib/api"
+import { useQuery } from "@tanstack/react-query"
+import { api } from "@/lib/api"
 import type { ApplyOperation } from "@/gen/piston/v1/piston_pb"
 import { Button } from "@/components/ui/button"
 import { ErrorNotice } from "@/components/Feedback"
@@ -9,31 +9,15 @@ export function ApplyChanges({ binaryId }: { binaryId: string }) {
   const history = useQuery({
     queryKey: ["binary", binaryId, "apply"],
     queryFn: ({ signal }) => api.listApplyOperations({ binaryId }, { signal }),
-  })
-  const preview = useMutation({
-    mutationFn: () => api.previewApply({ binaryId }),
-    onSuccess: async (result) => {
-      setOperation(result)
-      await invalidateBinary(binaryId)
-    },
-  })
-  const apply = useMutation({
-    mutationFn: () => api.executeApply({ id: operation!.id }),
-    onSuccess: async (result) => {
-      setOperation(result)
-      await invalidateBinary(binaryId)
-    },
+    refetchInterval: 3000,
   })
   return (
     <section className="settings-section flex flex-col gap-3">
       <h2>Ghidra changes</h2>
-      <Button
-        variant="outline"
-        disabled={preview.isPending || apply.isPending}
-        onClick={() => preview.mutate()}
-      >
-        Preview reviewed changes
-      </Button>
+      <p>
+        AI validation and Ghidra writeback run automatically. These saved change
+        sets are available for inspection.
+      </p>
       {operation ? (
         <>
           <p>
@@ -49,18 +33,6 @@ export function ApplyChanges({ binaryId }: { binaryId: string }) {
               </p>
             </article>
           ))}
-          <Button
-            disabled={
-              !operation.items.length ||
-              apply.isPending ||
-              !["preview", "uncertain"].includes(operation.status)
-            }
-            onClick={() => apply.mutate()}
-          >
-            {apply.isPending
-              ? "Applying reviewed changes…"
-              : "Apply this exact change set"}
-          </Button>
         </>
       ) : null}
       <details>
@@ -74,7 +46,7 @@ export function ApplyChanges({ binaryId }: { binaryId: string }) {
           </p>
         ))}
       </details>
-      <ErrorNotice error={preview.error ?? apply.error ?? history.error} />
+      <ErrorNotice error={history.error} />
     </section>
   )
 }

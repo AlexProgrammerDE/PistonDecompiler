@@ -48,6 +48,9 @@ impl Db {
     pub async fn recover(&self) -> Result<()> {
         // Preserve uncertainty after a lost response; retries can incur another charge.
         let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE binaries SET recovery_writer=0")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Check the provider before retrying.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET status='interrupted',error='Extraction was interrupted. Resume to extract again.' WHERE status='extracting'").execute(&mut *tx).await?;
         sqlx::query("UPDATE type_operations SET status='uncertain',error='Process stopped during type writeback. Retry the exact operation.' WHERE status='applying'").execute(&mut *tx).await?;

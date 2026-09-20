@@ -1,6 +1,6 @@
 # Implementation status
 
-The architecture documents define the target. The current implementation exposes the recovery workflow through the CLI.
+The architecture documents define the target. The current implementation runs recovery through the server and CLI.
 
 ## Implemented
 
@@ -17,8 +17,9 @@ The architecture documents define the target. The current implementation exposes
 - Optional provider JSON Schema responses and numbered evidence for citation checks.
 - Exact Ghidra previews, transactional type changes, class namespaces, and operation reconciliation.
 - Refreshed decompilation without loss of historical evidence, reviews, or accounting.
-- Bounded recovery iterations, fixed SCC evidence snapshots, oscillation detection, and graph-change replanning.
+- Bounded recovery passes with wider context and early stopping when no new evidence is available.
 - Persistent iteration status through `recovery-status`.
+- C++ pointer-table and RTTI evidence, runtime virtual dispatch, base layouts, typed vtable data, and stable local-variable refinement.
 - Native Ghidra desktop ownership, save verification, and reopening saved projects without replaying definitions.
 - Live extraction and analysis reports, measured estimates, and downloadable status snapshots.
 
@@ -35,12 +36,14 @@ The collector targets one main module. Configured allocator profiles use allocat
 Memory instruction tracing currently covers scalar x86-64 MOV operations. Other instructions and architectures need adapters.
 Multi-module capture, floating-point argument decoding, and arbitrary allocator contracts remain extensions.
 
-Type recovery does not yet represent unions, bitfields, inheritance metadata, or explicit parameter storage.
+Type recovery supports explicit base subobjects, multiple vptrs, typed vtable bindings, and local refinements.
+Unions, bitfields, overlapping base layouts, and explicit parameter storage remain unsupported.
+See [C++ recovery](architecture/cpp-recovery.md) for evidence, writeback, and platform limits.
 The system preserves unresolved facts rather than manufacturing these layouts.
 
 Runtime session management and recorded-function analysis have web controls.
-Structured type previews and the full iterative recovery command still use the CLI.
-A restarted recovery command creates new analysis runs. It does not automatically resume a partially completed component iteration.
+The server applies supported fields and runs bounded reanalysis automatically. The CLI uses the same durable recovery phases.
+Uncertain fields are deferred without manual review. Provider errors and unreconciled writeback failures remain explicit operational failures.
 
 ## Validation
 
@@ -58,3 +61,13 @@ Set `PISTON_TEST_GHIDRA_DESKTOP=1` to test the native desktop connection as well
 This test saves recovered definitions, terminates that Ghidra process, and opens a new process against the same project.
 It verifies preserved fields, method namespace, and decompilation without importing or applying the type plan again.
 Run it on a test display when available to avoid interrupting desktop work.
+
+Run the C++ integration test with the recorder's Python environment:
+
+```sh
+PISTON_TEST_GHIDRA_HOME=/path/to/ghidra \
+PISTON_TEST_PYTHON=/path/to/python-with-frida \
+  cargo test --test cpp native_cpp -- --ignored
+```
+
+This test uses both symbol-bearing and stripped C++ fixtures. It verifies secondary base pointers, adjustor thunks, and saved refinements without provider calls.

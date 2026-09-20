@@ -3,16 +3,22 @@ import * as THREE from "three"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import type { Graph } from "@/gen/piston/v1/piston_pb"
 
+import type { GraphLayout } from "@/lib/graph-layout"
+import { Button } from "@/components/ui/button"
+
 type Runtime = {
-  update: (graph: Graph, running: Set<string>) => void
+  fit: () => void
+  update: (graph: Graph, running: Set<string>, layout: GraphLayout) => void
 }
 
 export default function CallGraph3D({
   graph,
+  layout,
   running,
   onSelect,
 }: {
   graph: Graph
+  layout: GraphLayout
   running: Set<string>
   onSelect: (id: string) => void
 }) {
@@ -21,7 +27,9 @@ export default function CallGraph3D({
   const [unavailable, setUnavailable] = useState(false)
   const [hovered, setHovered] = useState("")
   const select = useEffectEvent((id: string) => onSelect(id))
-  const refresh = useEffectEvent(() => runtime.current?.update(graph, running))
+  const refresh = useEffectEvent(() =>
+    runtime.current?.update(graph, running, layout)
+  )
 
   useEffect(() => {
     const container = host.current
@@ -39,12 +47,12 @@ export default function CallGraph3D({
     canvas.setAttribute("role", "img")
     container.appendChild(canvas)
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000)
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000)
     camera.position.set(0, 10, 80)
     const controls = new OrbitControls(camera, canvas)
     controls.enableDamping = false
     controls.minDistance = 5
-    controls.maxDistance = 300
+    controls.maxDistance = 5000
     // Render only on interaction or data changes. There is no automatic camera motion.
     const render = () => renderer.render(scene, camera)
     controls.addEventListener("change", render)
@@ -66,9 +74,67 @@ export default function CallGraph3D({
       THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>
     >()
     let lines: THREE.LineSegments | undefined
-    let fitted = false
+    let fittedLayout: GraphLayout | undefined
+    let highlightLines: THREE.LineSegments | undefined
+    let currentEdges: Graph["edges"] = []
+    let hoveredId: string | undefined
+    const highlightMaterial = new THREE.LineBasicMaterial({ color: 0xd7ddc8 })
+    const dimmed = new THREE.MeshBasicMaterial({ color: 0x45483c })
+    const fit = () => {
+      if (!meshes.size) return
+      const bounds = new THREE.Box3().setFromObject(scene)
+      const center = bounds.getCenter(new THREE.Vector3())
+      const size = bounds.getSize(new THREE.Vector3())
+      const vertical = THREE.MathUtils.degToRad(camera.fov / 2)
+      const distance = Math.max(
+        25,
+        (Math.max(
+          size.y / (2 * Math.tan(vertical)),
+          size.x / (2 * Math.tan(vertical) * camera.aspect)
+        ) +
+          size.z / 2) *
+          1.15
+      )
+      controls.target.copy(center)
+      camera.position.copy(center).add(new THREE.Vector3(0, 0, distance))
+      controls.update()
+      render()
+    }
+    const highlight = (id: string | undefined) => {
+      hoveredId = id
+      if (highlightLines) {
+        scene.remove(highlightLines)
+        highlightLines.geometry.dispose()
+        highlightLines = undefined
+      }
+      const related = new Set([id])
+      const points: THREE.Vector3[] = []
+      if (id)
+        for (const edge of currentEdges) {
+          if (edge.caller !== id && edge.callee !== id) continue
+          related.add(edge.caller)
+          related.add(edge.callee)
+          const from = meshes.get(edge.caller),
+            to = meshes.get(edge.callee)
+          if (from && to) points.push(from.position, to.position)
+        }
+      for (const [nodeId, mesh] of meshes)
+        mesh.material =
+          id && !related.has(nodeId) ? dimmed : mesh.userData.material
+      edgeMaterial.opacity = id ? 0.06 : 0.25
+      if (points.length) {
+        highlightLines = new THREE.LineSegments(
+          new THREE.BufferGeometry().setFromPoints(points),
+          highlightMaterial
+        )
+        scene.add(highlightLines)
+      }
+      render()
+    }
     runtime.current = {
-      update(next, busy) {
+      fit,
+      update(next, busy, nextLayout) {
+        currentEdges = next.edges
         const ids = new Set(next.nodes.map((node) => node.id))
         for (const [id, mesh] of meshes) {
           if (!ids.has(id)) {
@@ -76,47 +142,35 @@ export default function CallGraph3D({
             meshes.delete(id)
           }
         }
-        const modules = [
-          ...new Set(next.nodes.map((node) => node.module)),
-        ].sort()
         const positions = new Map<string, THREE.Vector3>()
-        const columns = Math.max(1, Math.ceil(Math.sqrt(modules.length)))
-        for (const [groupIndex, module] of modules.entries()) {
-          const members = next.nodes
-            .filter((node) => node.module === module)
-            .sort((a, b) => a.address.localeCompare(b.address))
-          const radius = Math.max(3, Math.sqrt(members.length) * 1.5)
-          for (const [index, node] of members.entries()) {
-            const angle = index * Math.PI * (3 - Math.sqrt(5))
-            const y =
-              members.length === 1 ? 0 : 1 - (2 * index) / (members.length - 1)
-            const ring = Math.sqrt(1 - y * y)
-            const position = new THREE.Vector3(
-              ((groupIndex % columns) - (columns - 1) / 2) * 24 +
-                Math.cos(angle) * ring * radius,
-              -Math.floor(groupIndex / columns) * 24 + y * radius,
-              Math.sin(angle) * ring * radius
-            )
-            positions.set(node.id, position)
-            let mesh = meshes.get(node.id)
-            if (!mesh) {
-              mesh = new THREE.Mesh(geometry, pending)
-              meshes.set(node.id, mesh)
-              scene.add(mesh)
-            }
-            mesh.position.copy(position)
-            mesh.material = node.stale
-              ? stale
-              : busy.has(node.id)
-                ? active
-                : node.resultId
-                  ? analyzed
-                  : pending
-            mesh.scale.setScalar(busy.has(node.id) ? 1.5 : 1)
-            mesh.userData = {
-              id: node.id,
-              label: `${node.proposedName || node.name} · ${node.address}${busy.has(node.id) ? " · analyzing" : ""}`,
-            }
+        for (const node of next.nodes) {
+          const point = nextLayout.positions[node.id]
+          if (!point) continue
+          const position = new THREE.Vector3(
+            point.x * 0.12,
+            -point.y * 0.12,
+            point.z * 0.12
+          )
+          positions.set(node.id, position)
+          let mesh = meshes.get(node.id)
+          if (!mesh) {
+            mesh = new THREE.Mesh(geometry, pending)
+            meshes.set(node.id, mesh)
+            scene.add(mesh)
+          }
+          mesh.position.copy(position)
+          mesh.material = node.stale
+            ? stale
+            : busy.has(node.id)
+              ? active
+              : node.resultId
+                ? analyzed
+                : pending
+          mesh.scale.setScalar(busy.has(node.id) ? 1.5 : 1)
+          mesh.userData = {
+            material: mesh.material,
+            id: node.id,
+            label: `${node.proposedName || node.name} · ${node.address}${busy.has(node.id) ? " · analyzing" : ""}`,
           }
         }
         if (lines) {
@@ -134,18 +188,11 @@ export default function CallGraph3D({
           edgeMaterial
         )
         scene.add(lines)
-        if (!fitted && meshes.size) {
-          const bounds = new THREE.Box3().setFromObject(scene)
-          const center = bounds.getCenter(new THREE.Vector3())
-          const size = bounds.getSize(new THREE.Vector3()).length()
-          controls.target.copy(center)
-          camera.position
-            .copy(center)
-            .add(new THREE.Vector3(0, size * 0.2, Math.max(25, size * 1.4)))
-          controls.update()
-          fitted = true
+        if (fittedLayout !== nextLayout && meshes.size) {
+          fit()
+          fittedLayout = nextLayout
         }
-        render()
+        highlight(hoveredId)
       },
     }
     const resize = new ResizeObserver(() => {
@@ -172,6 +219,7 @@ export default function CallGraph3D({
     const move = (event: PointerEvent) => {
       const object = hit(event)
       setHovered(object?.userData.label ?? "")
+      if (object?.userData.id !== hoveredId) highlight(object?.userData.id)
       canvas.style.cursor = object ? "pointer" : "grab"
     }
     let pressed: { x: number; y: number } | undefined
@@ -190,6 +238,7 @@ export default function CallGraph3D({
     }
     const leave = () => {
       setHovered("")
+      highlight(undefined)
       pressed = undefined
     }
     const lost = (event: Event) => {
@@ -201,6 +250,9 @@ export default function CallGraph3D({
     canvas.addEventListener("pointerup", up)
     canvas.addEventListener("pointerleave", leave)
     canvas.addEventListener("webglcontextlost", lost)
+    renderer.setSize(container.clientWidth, container.clientHeight)
+    camera.aspect = container.clientWidth / Math.max(1, container.clientHeight)
+    camera.updateProjectionMatrix()
     refresh()
     return () => {
       runtime.current = null
@@ -213,27 +265,40 @@ export default function CallGraph3D({
       canvas.removeEventListener("pointerleave", leave)
       canvas.removeEventListener("webglcontextlost", lost)
       geometry.dispose()
-      for (const material of [pending, analyzed, active, stale, edgeMaterial])
+      for (const material of [
+        pending,
+        analyzed,
+        active,
+        stale,
+        edgeMaterial,
+        highlightMaterial,
+        dimmed,
+      ])
         material.dispose()
       lines?.geometry.dispose()
+      highlightLines?.geometry.dispose()
       renderer.dispose()
       canvas.remove()
     }
   }, [])
   useEffect(() => {
     refresh()
-  }, [graph, running])
+  }, [graph, running, layout])
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-sm text-muted-foreground">
-        Drag to orbit, scroll to zoom, and select a node to inspect it.
-        Functions are grouped by module. Use the 2D view for keyboard
-        navigation.
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="mr-auto text-sm text-muted-foreground">
+          Drag to orbit, scroll to zoom, and select a node to inspect it. Hover
+          a function to highlight its calls. Use 2D for keyboard navigation.
+        </p>
+        <Button variant="outline" onClick={() => runtime.current?.fit()}>
+          Fit graph
+        </Button>
+      </div>
       <div
         ref={host}
-        className="h-96 w-full overflow-hidden rounded-md border"
+        className="h-[32rem] w-full overflow-hidden rounded-md border"
         hidden={unavailable}
       />
       {unavailable ? (

@@ -74,7 +74,9 @@ Events can include `timestamp_us`, measured from collector startup with millisec
 Buffered Stalker timestamps reflect delivery, not exact instruction execution time. Thread order does not establish cross-thread causality.
 Markers contain a `label` and enter each observed function’s bounded evidence context.
 The Rust definitions in `src/runtime.rs` specify the fields for each variant.
-Dedicated vtable events and multi-process sessions remain extensions to this format.
+The `virtual_dispatch` and `this_adjustment` variants add receiver, slot, target, and lifetime evidence.
+See [C++ recovery](../architecture/cpp-recovery.md) for capture scope and validation.
+Multi-process sessions remain unsupported.
 
 Each function receives up to 128 sampled observation lines per session in model evidence.
 Referenced allocation records accompany those samples.

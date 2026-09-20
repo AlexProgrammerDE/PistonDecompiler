@@ -84,7 +84,7 @@ message AnalysisResult {
  string author = 5; string model = 6; string stage = 7; bool stale = 8;
  uint32 revision = 9; string name_review = 10; string summary_review = 11;
  string analysis_json = 12; string extraction_id = 13; int64 created_at = 14;
- string parent_id = 15; repeated string dependencies = 16; string input_json = 17; string transcript_json = 18;
+ string parent_id = 15; repeated string dependencies = 16; string input_json = 17; string transcript_json = 18; string automation_json = 19;
 }
 message ResultList { repeated AnalysisResult results = 1; }
 message ArtifactRequest { string id = 1; }

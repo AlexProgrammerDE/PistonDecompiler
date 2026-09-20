@@ -190,11 +190,11 @@ pub async fn analyze(ai: &Ai, db: &Db, job: &Job) -> Result<DecisionCompletion> 
         .iter()
         .all(|k| answers[*k].supports("supported", threshold))
     {
-        "review"
+        "validated"
     } else if job.stage == "verify_map" && !config.escalation_model.is_empty() {
         "escalate"
     } else {
-        "needs_review"
+        "deferred"
     };
     let input_tokens = response
         .pointer("/usage/input_tokens")
@@ -269,7 +269,7 @@ pub async fn finish(db: &Db, job: &Job, mut c: DecisionCompletion) -> Result<()>
         &job.binary_id,
         "info",
         &format!(
-            "{} finished for {}: {}. Assessment remains a model judgment, not approval.",
+            "{} finished for {}: {}. Automatic recovery will apply supported fields and defer unsupported fields.",
             job.stage, job.function_id, c.route
         ),
     )

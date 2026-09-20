@@ -169,6 +169,7 @@ pub async fn start(db: &Db, config: &Config, r: &proto::StartRecordingRequest) -
     plan["trace_calls"] = json!(r.mode == "investigate");
     plan["trace_blocks"] = json!(r.mode == "investigate");
     plan["trace_memory"] = json!(r.trace_memory);
+    plan["trace_objects"] = json!(r.mode == "investigate");
     plan["argv"] = json!(r.arguments);
     plan["cwd"] = json!(r.working_directory);
     let root = directory(config, &id);
@@ -433,7 +434,13 @@ pub async fn publish(db: &Db, config: &Config, id: &str) -> Result<()> {
         let functions: Vec<(String, i64)> = sqlx::query_as("SELECT f.address,COUNT(*) FROM runtime_observations o JOIN functions f ON f.id=o.function_id WHERE session_id=? GROUP BY f.id ORDER BY f.address")
             .bind(id).fetch_all(&db.pool).await?;
         let root = tokio::fs::canonicalize(directory(config, id)).await?;
-        let manifest = json!({"session":id,"scenario":r.scenario,"trace":root.join("trace.json"),
+        let trace: crate::runtime::Trace=serde_json::from_slice(&tokio::fs::read(root.join("trace.json")).await?)?;
+        trace.validate()?;
+        let calls: Vec<_>=trace.events.iter().filter_map(|event|match event.observation {
+            crate::runtime::Observation::Call{site_rva,target_rva} | crate::runtime::Observation::VirtualDispatch{site_rva,target_rva,..} => Some(json!({"site":format!("{:x}",trace.image_base+site_rva),"target":format!("{:x}",trace.image_base+target_rva)})),
+            _=>None,
+        }).collect();
+        let manifest = json!({"session":id,"scenario":r.scenario,"trace":root.join("trace.json"),"calls":calls,
             "functions":functions.into_iter().map(|(address,events)|json!({"address":address,"events":events})).collect::<Vec<_>>()});
         atomic(&root.join("ghidra.json"), &manifest).await?;
         let scripts = crate::ghidra::install_scripts(config).await?;
@@ -448,6 +455,7 @@ pub async fn publish(db: &Db, config: &Config, id: &str) -> Result<()> {
             ensure!(tokio::fs::read_to_string(acknowledgement).await? == id,
                 "Ghidra did not acknowledge runtime evidence");
         }
+        crate::ghidra::refresh(db,config,&r.binary_id).await?;
         Ok(())
     }.await;
     let status = match &result {

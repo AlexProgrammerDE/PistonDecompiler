@@ -95,6 +95,16 @@ pub async fn reports(db: &Db, binary: &str) -> Result<Vec<ProgressReport>> {
             });
         }
     }
+    if let Some(r) = sqlx::query("SELECT *,unixepoch() now FROM automatic_recovery WHERE binary_id=? ORDER BY rowid DESC LIMIT 1").bind(binary).fetch_optional(&db.pool).await? {
+        let status: String = r.get("status");
+        let done = matches!(status.as_str(), "completed" | "deferred" | "failed");
+        reports.push(ProgressReport {
+            phase: "Automatic Ghidra recovery".into(), status,
+            completed: (r.get::<i64,_>("pass") + 1) as u32, total: r.get::<i64,_>("max_passes") as u32,
+            elapsed_seconds: (if done {r.get::<i64,_>("updated_at")} else {r.get::<i64,_>("now")}) - r.get::<i64,_>("created_at"), eta_seconds: -1,
+            detail: if r.get::<String,_>("error").is_empty() { "Validates fields, saves supported changes in Ghidra, and reanalyzes affected functions automatically. Pass count is a limit, not an estimate.".into() } else {r.get("error")}, updated_at: r.get("updated_at"),
+        });
+    }
     Ok(reports)
 }
 

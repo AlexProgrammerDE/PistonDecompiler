@@ -102,46 +102,27 @@ Start the integrated recovery loop:
 pistondecompiler recover BINARY_ID --iterations 3
 ```
 
-The default creates a type preview and stops before type application.
-Inspect the preview through its saved operation and the linked analysis result.
+The server runs the same recovery automatically after the active analysis queue drains.
+No accept, reject, preview, or apply action is required.
 
-To authorize automatic application of assessed type proposals, use:
+Independent AI assessments select supported names, summaries, and types.
+Structural checks and a rolled-back Ghidra transaction validate each merged type plan.
+Conflicting or uncertain proposals are deferred automatically.
+Supported names and summaries can proceed even when a type plan is deferred.
 
-```sh
-pistondecompiler recover BINARY_ID --iterations 3 --apply-types
-```
+Writeback saves the existing Ghidra project and refreshes decompilation.
+Changed evidence queues affected functions for another callee-first pass.
+The iteration limit counts all analysis passes, including the initial pass. It does not require convergence before other functions can finish.
 
-Automatic application requires model confidence of at least 0.95 and a supporting Jev assessment.
-Structural and Ghidra conflict validation still apply.
-A conflicting or uncertain proposal stops recovery before caller analysis.
-
-Inspect progress and stop reasons:
+Read progress and stop reasons:
 
 ```sh
 pistondecompiler recovery-status BINARY_ID
 ```
 
-A new invocation creates new analysis runs and can incur new provider charges.
-It does not silently resume an unfinished model request or reset its accounting.
+Recovery persists its phase, operation IDs, and pass count across restarts.
+It retries an interrupted writeback using the same operation ID.
+An unresolved provider request retains its accounting status; restarting does not silently resend it.
 
-## Apply a reviewed type proposal manually
-
-```sh
-pistondecompiler preview-types RESULT_ID
-pistondecompiler apply-types OPERATION_ID
-```
-
-Application refreshes decompilation from the existing Ghidra project.
-The operation preserves historical results, reviews, and cost accounting.
-
-To combine compatible proposals in one preview, pass multiple result IDs:
-
-```sh
-pistondecompiler preview-types RESULT_ID_1 RESULT_ID_2
-```
-
-Conflicting definitions or signatures stop the preview before Ghidra changes.
-
-If application stops with an uncertain outcome, inspect the Ghidra log and retry the same operation ID.
-The Ghidra transaction stores the operation identity for idempotent reconciliation.
-Do not create a replacement operation while the original remains uncertain.
+Type application currently re-exports the whole Ghidra program.
+Only changed evidence invalidates prior results. Targeted export remains an optimization for large programs.

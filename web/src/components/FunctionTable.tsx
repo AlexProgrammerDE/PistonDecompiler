@@ -134,8 +134,8 @@ export function FunctionTable({
         >
           <option value="all">All functions</option>
           <option value="eligible">Eligible</option>
-          <option value="review">Needs review</option>
-          <option value="accepted">Accepted</option>
+          <option value="review">Awaiting validation</option>
+          <option value="accepted">Validated</option>
           <option value="stale">Needs reconsideration</option>
           <option value="skipped">Skipped</option>
         </select>

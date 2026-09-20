@@ -43,7 +43,7 @@ Review and accept any first-launch agreement in the native Ghidra window yoursel
 ## One program, one writer
 
 The desktop owns the Ghidra project while it is open.
-Piston sends only its export, reviewed-name, and structured-type operations to that process.
+Piston sends only its export, validated-name, and structured-type operations to that process.
 Changes run in Ghidra transactions and trigger its normal program change events.
 Write operations save the program before reporting success, including any existing unsaved program edits.
 Read operations do not save the program.
@@ -64,7 +64,7 @@ Startup and operation errors are recorded in `desktop/desktop.log` and in the ap
 ## Integration reference
 
 [ReVa](https://github.com/cyberkaida/reverse-engineering-assistant) demonstrates an assistant working with an open Ghidra program.
-Piston uses the same program-ownership principle while retaining its existing validated scripts and review workflow.
+Piston uses the same program-ownership principle while retaining its existing validated scripts and automatic recovery workflow.
 It does not install ReVa or expose its MCP tools.
 
 ## Reopen after a reboot

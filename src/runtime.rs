@@ -36,6 +36,24 @@ pub struct Event {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Observation {
+    VirtualDispatch {
+        invocation: u64,
+        allocation: String,
+        object_offset: u64,
+        receiver: u64,
+        vtable_rva: u64,
+        slot_offset: u64,
+        site_rva: u64,
+        target_rva: u64,
+    },
+    ThisAdjustment {
+        invocation: u64,
+        allocation: String,
+        receiver_before: u64,
+        receiver_after: u64,
+        adjustment: i64,
+        target_rva: u64,
+    },
     Marker {
         label: String,
     },
@@ -107,6 +125,8 @@ impl Trace {
         );
         ensure!(self.events.len() <= 200_000, "Trace exceeds 200000 events");
         let mut allocations = HashMap::new();
+        let mut bases: HashMap<&String, u64> = HashMap::new();
+        let mut dispatches = HashMap::new();
         let mut seen = std::collections::HashSet::new();
         let mut previous = None;
         for event in &self.events {
@@ -121,6 +141,72 @@ impl Trace {
                     .context("Code address overflow")?;
             }
             match &event.observation {
+                Observation::VirtualDispatch {
+                    invocation,
+                    allocation,
+                    object_offset,
+                    receiver,
+                    vtable_rva,
+                    slot_offset,
+                    site_rva,
+                    target_rva,
+                } => {
+                    let size = allocations
+                        .get(allocation)
+                        .context("Dispatch outside object lifetime")?;
+                    ensure!(
+                        object_offset
+                            .checked_add(self.pointer_width.into())
+                            .is_some_and(|end| end <= *size)
+                            && bases[allocation].checked_add(*object_offset) == Some(*receiver),
+                        "Invalid dispatch receiver"
+                    );
+                    ensure!(
+                        *slot_offset % u64::from(self.pointer_width) == 0
+                            && *slot_offset < 128 * u64::from(self.pointer_width),
+                        "Invalid virtual slot"
+                    );
+                    for rva in [vtable_rva, site_rva, target_rva] {
+                        self.image_base
+                            .checked_add(*rva)
+                            .context("Dispatch address overflow")?;
+                    }
+                    ensure!(
+                        dispatches
+                            .insert(
+                                (event.thread, *invocation),
+                                (allocation, *receiver, *target_rva)
+                            )
+                            .is_none(),
+                        "Duplicate dispatch invocation"
+                    );
+                }
+                Observation::ThisAdjustment {
+                    invocation,
+                    allocation,
+                    receiver_before,
+                    receiver_after,
+                    adjustment,
+                    target_rva,
+                } => {
+                    let size = allocations
+                        .get(allocation)
+                        .context("Adjustment outside object lifetime")?;
+                    ensure!(
+                        dispatches.remove(&(event.thread, *invocation))
+                            == Some((allocation, *receiver_before, *target_rva)),
+                        "Adjustment has no matching dispatch"
+                    );
+                    ensure!(
+                        i128::from(*receiver_after) - i128::from(*receiver_before)
+                            == i128::from(*adjustment)
+                            && *receiver_after >= bases[allocation]
+                            && receiver_after
+                                .checked_sub(bases[allocation])
+                                .is_some_and(|offset| offset < *size),
+                        "Invalid this adjustment"
+                    );
+                }
                 Observation::Marker { label } => {
                     ensure!(!label.is_empty() && label.len() <= 256, "Invalid marker");
                 }
@@ -142,6 +228,7 @@ impl Trace {
                         "Invalid or reused allocation identity"
                     );
                     allocations.insert(allocation, *size);
+                    bases.insert(allocation, *address);
                 }
                 Observation::Free { allocation } => {
                     ensure!(
@@ -310,7 +397,8 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
             if lines.len() < 128 {
                 lines.push(content);
             }
-            if let Observation::Call { target_rva, .. } = event.observation
+            if let Observation::Call { target_rva, .. }
+            | Observation::VirtualDispatch { target_rva, .. } = event.observation
                 && let Some(target) = functions.get(&(trace.image_base + target_rva))
             {
                 sqlx::query("INSERT OR IGNORE INTO edges(caller,callee) VALUES(?,?)")
@@ -360,9 +448,10 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
             .collect();
         lines.splice(0..0, allocations);
         let content = format!(
-            "Runtime observations from scenario {:?}, session {}. Snapshots are samples, not proof of an instruction write. Region identity has unknown allocation lifetime. Times are microseconds since collector start; cross-thread ordering is observational, not causal. Samples are incomplete. Dropped events: {}.\n{}",
+            "Runtime observations from scenario {:?}, session {}. Module RVAs use Ghidra image base {:#x}. Virtual dispatch records a receiver-vtable match, not a complete target set or proven class identity. Snapshots are samples, not proof of an instruction write. Region identity has unknown allocation lifetime. Times are microseconds since collector start; cross-thread ordering is observational, not causal. Samples are incomplete. Dropped events: {}.\n{}",
             trace.scenario,
             trace.id,
+            trace.image_base,
             trace.dropped_events,
             lines.join("\n")
         );
@@ -403,6 +492,29 @@ pub async fn capture_plan(db: &Db, binary: &str) -> Result<serde_json::Value> {
         .filter_map(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .find_map(|v| v["image_base"].as_u64())
         .context("Export with image-base metadata before creating a capture plan")?;
+    let all: Vec<(String, String)> =
+        sqlx::query_as("SELECT address,type_context FROM functions WHERE binary_id=?")
+            .bind(binary)
+            .fetch_all(&db.pool)
+            .await?;
+    let mut thunk_targets = serde_json::Map::new();
+    for (address, context) in all {
+        let context: serde_json::Value = serde_json::from_str(&context).unwrap_or_default();
+        if let Some(target) = context["cpp"]["thunk_target"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            && let (Some(source), Some(target)) = (
+                crate::cpp::address(&address)
+                    .ok()
+                    .and_then(|address| address.checked_sub(base)),
+                crate::cpp::address(target)
+                    .ok()
+                    .and_then(|address| address.checked_sub(base)),
+            )
+        {
+            thunk_targets.insert(source.to_string(), serde_json::json!(target));
+        }
+    }
     let rows=sqlx::query("SELECT address,size,name,disassembly FROM functions WHERE binary_id=? AND skip_reason='' ORDER BY address").bind(binary).fetch_all(&db.pool).await?;
     let mut functions = Vec::new();
     for row in rows {
@@ -420,7 +532,7 @@ pub async fn capture_plan(db: &Db, binary: &str) -> Result<serde_json::Value> {
         }
     }
     Ok(
-        serde_json::json!({"binary_sha256":b.sha256,"image_base":base,"max_events":100000,"samples_per_function":8,"allocations":true,"trace_calls":false,"trace_blocks":false,"functions":functions}),
+        serde_json::json!({"binary_sha256":b.sha256,"image_base":base,"max_events":100000,"samples_per_function":8,"allocations":true,"trace_calls":false,"trace_blocks":false,"thunk_targets":thunk_targets,"functions":functions}),
     )
 }
 

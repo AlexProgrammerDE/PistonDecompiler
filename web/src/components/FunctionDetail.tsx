@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "motion/react"
-import { ResultReview, ResultHistory } from "@/components/ResultReview"
+import { ResultDetails, ResultHistory } from "@/components/ResultDetails"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -49,10 +49,9 @@ export function FunctionDetail({
           </div>
           {detail.result ? (
             <>
-              <ResultReview
+              <ResultDetails
                 key={`${detail.result.id}:${detail.result.revision}`}
                 result={detail.result}
-                binaryId={binaryId}
               />
               <ResultHistory
                 functionId={id}
@@ -145,8 +144,8 @@ export function FunctionDetail({
             >
               <div className="flex flex-col gap-4">
                 <p className="text-muted-foreground">
-                  Model assessments guide analysis. They do not approve changes
-                  to Ghidra.
+                  AI validation controls automatic Ghidra writeback. Unsupported
+                  fields are deferred without requiring your review.
                 </p>
                 {detail.decisions.length === 0 ? (
                   <p>No assessments yet.</p>
@@ -162,13 +161,15 @@ export function FunctionDetail({
                       <h4>{decision.stage.replaceAll("_", " ")}</h4>
                       <p>
                         {decision.route === "superseded"
-                          ? "The proposal changed or was reviewed. No further work was queued."
+                          ? "The proposal changed. This assessment no longer applies."
                           : decision.route === "defer"
-                            ? "Deferred: gather more evidence before reanalysis."
-                            : decision.route === "needs_review"
-                              ? "Uncertain proposal: review the evidence."
-                              : decision.route === "review"
-                                ? "Checks passed. Human review is still required."
+                            ? "Deferred automatically until new evidence is available."
+                            : ["needs_review", "deferred"].includes(
+                                  decision.route
+                                )
+                              ? "Uncertain fields are deferred automatically."
+                              : ["review", "validated"].includes(decision.route)
+                                ? "Validation passed. Supported changes are applied automatically."
                                 : decision.route === "escalate"
                                   ? "Routed to the escalation model."
                                   : "Routed to the generation model."}

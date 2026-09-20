@@ -14,6 +14,8 @@ let settings;
 let module;
 let traceThread = () => {};
 const tracedThreads = new Set();
+const pendingDispatch = new Map();
+const dispatchSamples = new Map();
 function emit(functionRva, observation) {
   if (stopping || count >= settings.max_events) { dropped++; return false; }
   count++;
@@ -58,6 +60,53 @@ function memorySample(functionRva, instructionRva, pointer, width, write) {
       instruction_rva:instructionRva, value:Array.from(buffer, b => b.toString(16).padStart(2,'0')).join('')});
   } catch (_) { dropped++; }
 }
+function moduleRva(address) {
+  const offset=addressNumber(address.sub(module.base));
+  return offset>=0 && offset<module.size ? offset : null;
+}
+function effectiveAddress(mem, next, context) {
+  if(mem.segment) return null;
+  let address=mem.base==='rip'?next:mem.base?context[mem.base]:ptr(0);
+  if(!address) return null;
+  if(mem.index) {if(!context[mem.index]) return null;address=address.add(addressNumber(context[mem.index])*mem.scale);}
+  return address.add(mem.disp);
+}
+function dispatchSample(owner, site, operand, next, context) {
+  const thread=Process.getCurrentThreadId();pendingDispatch.delete(thread);
+  if((dispatchSamples.get(site)||0)>=settings.samples_per_function) return;
+  try {
+    const receiver=Process.platform==='windows'?context.rcx:context.rdi;
+    if(!receiver || receiver.isNull()) return;
+    const target=operand.type==='reg'?context[operand.value]:effectiveAddress(operand.value,next,context)?.readPointer();
+    if(!target || moduleRva(target)===null) return;
+    const table=receiver.readPointer();const tableRva=moduleRva(table);
+    if(tableRva===null) return;
+    const range=Process.findRangeByAddress(table);
+    if(!range || !range.protection.includes('r') || range.protection.includes('x')) return;
+    const matches=[];
+    const operandAddress=operand.type==='mem'?effectiveAddress(operand.value,next,context):null;
+    for(let slot=0;slot<128;slot++) {
+      const entry=table.add(slot*Process.pointerSize);
+      if(entry.add(Process.pointerSize).compare(range.base.add(range.size))>0) break;
+      const pointer=entry.readPointer();
+      const code=Process.findRangeByAddress(pointer);
+      if(!code || !code.protection.includes('x')) break;
+      if(pointer.equals(target)) matches.push(slot);
+    }
+    const exact=operandAddress?matches.filter(slot=>table.add(slot*Process.pointerSize).equals(operandAddress)):[];
+    const candidates=exact.length?exact:matches;
+    if(candidates.length!==1) return;
+    const slot=candidates[0];
+      const object=region(receiver,Process.pointerSize,owner);
+      if(!object || object.offset+Process.pointerSize>object.size) return;
+      const id=++invocation;
+      if(emit(owner,{kind:'virtual_dispatch',invocation:id,allocation:object.id,object_offset:object.offset,receiver:addressNumber(receiver),vtable_rva:tableRva,slot_offset:slot*Process.pointerSize,site_rva:site,target_rva:moduleRva(target)})) {
+        dispatchSamples.set(site,(dispatchSamples.get(site)||0)+1);
+        pendingDispatch.set(thread,{owner,invocation:id,object,receiver,target:moduleRva(target),implementation:settings.thunk_targets?.[moduleRva(target)]});
+      }
+      return;
+  } catch (_) { dropped++; }
+}
 rpc.exports = {
   identity() { const m=Process.mainModule; return {path:m.path,base:m.base.toString(),pointer_width:Process.pointerSize,architecture:Process.arch}; },
   marker(label) { if (typeof label !== "string" || !label.length || label.length > 256) throw new Error("Invalid marker"); emit(null,{kind:"marker",label}); },
@@ -73,7 +122,7 @@ rpc.exports = {
       if (allocations.has(key)) return;
       const id = `allocation-${++allocationSequence}`;
       if (emit(null, {kind:'allocation', allocation:id, address:addressNumber(result), size}))
-        allocations.set(key, {id, base:result, size});
+        allocations.set(key, {id, base:ptr(result.toString()), size});
     }
     function released(pointer) {
       const key = pointer.toString(); const allocation = allocations.get(key);
@@ -127,14 +176,21 @@ rpc.exports = {
       traceThread = (threadId) => {
         if(tracedThreads.has(threadId)) return;
         tracedThreads.add(threadId);
-        Stalker.follow(threadId, {transform: plan.trace_memory ? (iterator) => {
+        Stalker.follow(threadId, {transform: (plan.trace_memory || (plan.trace_objects && Process.arch === "x64")) ? (iterator) => {
           let instruction;
           while ((instruction = iterator.next()) !== null) {
             const site = Number(instruction.address.sub(module.base).toString());
             const owner = sites.get(site);
+            if(plan.trace_objects && Process.arch==='x64' && owner!==undefined && instruction.mnemonic==='call') {
+              const operand=instruction.operands[0];const next=instruction.next;
+              if(operand && (operand.type==='reg' || operand.type==='mem')) {
+                const saved={...operand,value:operand.type==='mem'?{...operand.value}:operand.value};
+                iterator.putCallout(context=>dispatchSample(owner,site,saved,next,context));
+              }
+            }
             // Only plain MOV loads/stores: no REP, atomics, segment addressing,
             // vector instructions or read-modify-write claims without an adapter.
-            const operand = instruction.mnemonic === 'mov' && instruction.operands.find(o => o.type === 'mem');
+            const operand = plan.trace_memory && instruction.mnemonic === 'mov' && instruction.operands.find(o => o.type === 'mem');
             if (owner === undefined || !operand || operand.size > 8 || operand.size < 1 || operand.value.segment) { iterator.keep(); continue; }
             const mem = {...operand.value};
             const width = operand.size;
@@ -184,6 +240,14 @@ rpc.exports = {
       try { listeners.push(Interceptor.attach(target, {
         onEnter(args) {
           traceThread(this.threadId);
+          const dispatch=pendingDispatch.get(this.threadId);
+          const enteringThunk=dispatch && dispatch.implementation!==undefined && dispatch.implementation!==dispatch.target && dispatch.target===fn.rva;
+          if(!enteringThunk) pendingDispatch.delete(this.threadId);
+          if(dispatch && (dispatch.implementation===undefined?dispatch.target:dispatch.implementation)===fn.rva) {
+            const after=args[0];const offset=addressNumber(after)-addressNumber(dispatch.object.base);
+            if(offset>=0 && offset<dispatch.object.size)
+              emit(dispatch.owner,{kind:'this_adjustment',invocation:dispatch.invocation,allocation:dispatch.object.id,receiver_before:addressNumber(dispatch.receiver),receiver_after:addressNumber(after),adjustment:addressNumber(after)-addressNumber(dispatch.receiver),target_rva:dispatch.target});
+          }
           hits++;
           // Record coverage once per function; samples are bounded separately.
           if (hits === 1) emit(fn.rva,{kind:'coverage',hits:1});

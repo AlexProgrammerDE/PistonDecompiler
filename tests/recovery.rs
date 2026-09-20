@@ -36,17 +36,18 @@ async fn recovery_analyzes_callees_before_callers_and_pins_each_component() {
         ..Default::default()
     })
     .unwrap();
-    recovery::run(&db, &Config::default(), &ai, "b", 3, false)
+    recovery::run(&db, &Config::default(), &ai, "b", 3)
         .await
         .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec!["1010", "1000"]);
-    let stable: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM recovery_iterations WHERE status='stable'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
-    assert_eq!(stable, 2);
-    assert!(db.overview("b").await.unwrap().paused);
+    let stable: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM automatic_recovery WHERE status IN ('completed','deferred')",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(stable, 1);
+    assert!(!db.overview("b").await.unwrap().paused);
     sqlx::query("INSERT INTO edges(caller,callee) VALUES('b:1010','b:1000')")
         .execute(&db.pool)
         .await
@@ -56,7 +57,7 @@ async fn recovery_analyzes_callees_before_callers_and_pins_each_component() {
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    recovery::run(&db, &Config::default(), &ai, "b", 3, false)
+    recovery::run(&db, &Config::default(), &ai, "b", 3)
         .await
         .unwrap();
     let stale:i64=sqlx::query_scalar("SELECT COUNT(*) FROM functions f JOIN results r ON r.id=f.current_result_id WHERE r.stale=1").fetch_one(&db.pool).await.unwrap();
@@ -148,7 +149,7 @@ async fn real_ghidra_recovery_applies_types_then_converges_with_fresh_evidence()
             } else {
                 json!({"definitions":[],"signatures":[]})
             };
-            let analysis = json!({"proposed_name":"read_value","summary":"Returns a value.","confidence":0.99,"evidence":["fixture"],"claims":[{"text":"Fixture interpretation.","references":[{"artifact_id":context["evidence"][0]["artifact_id"],"start_line":1,"end_line":1}]}],"parameter_types":[],"side_effects":[],"uncertainties":[],"type_plan":plan});
+            let analysis = json!({"proposed_name":context["name"],"summary":"Returns a value.","confidence":0.99,"evidence":["fixture"],"claims":[{"text":"Fixture interpretation.","references":[{"artifact_id":context["evidence"][0]["artifact_id"],"start_line":1,"end_line":1}]}],"parameter_types":[],"side_effects":[],"uncertainties":[],"type_plan":plan});
             Json(
                 json!({"id":"fixture","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":analysis.to_string()}}],"usage":{"prompt_tokens":100,"completion_tokens":100,"total_tokens":200}}),
             )
@@ -181,7 +182,7 @@ async fn real_ghidra_recovery_applies_types_then_converges_with_fresh_evidence()
         ..Default::default()
     };
     let ai = Ai::new(config.ai.clone()).unwrap();
-    let result = recovery::run(&db, &config, &ai, &b.id, 3, true).await;
+    let result = recovery::run(&db, &config, &ai, &b.id, 3).await;
     if result.is_err() && config.ghidra_gui {
         let log = std::fs::read_to_string(
             config

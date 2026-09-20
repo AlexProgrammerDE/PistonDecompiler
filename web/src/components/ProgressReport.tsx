@@ -23,7 +23,15 @@ export function ProgressReport({
   const reports = query.data?.progress ?? []
   const active = reports.filter(
     (r) =>
-      !["completed", "ready", "indexed", "applied", "stable"].includes(r.status)
+      ![
+        "completed",
+        "ready",
+        "indexed",
+        "applied",
+        "stable",
+        "deferred",
+        "unchanged",
+      ].includes(r.status)
   )
   const shown = compact
     ? (active.length ? active : reports).slice(0, 1)
@@ -106,9 +114,15 @@ export function ProgressReport({
             Elapsed {duration(r.elapsedSeconds)} ·{" "}
             {r.etaSeconds >= 0n
               ? `Estimated remaining ${duration(r.etaSeconds)}`
-              : ["completed", "ready", "indexed", "applied", "stable"].includes(
-                    r.status
-                  )
+              : [
+                    "completed",
+                    "ready",
+                    "indexed",
+                    "applied",
+                    "stable",
+                    "deferred",
+                    "unchanged",
+                  ].includes(r.status)
                 ? "Finished"
                 : "ETA unavailable"}
           </p>

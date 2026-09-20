@@ -37,8 +37,6 @@ enum Command {
         binary: String,
         #[arg(long, default_value_t = 3)]
         iterations: u32,
-        #[arg(long)]
-        apply_types: bool,
     },
     /// Preview and merge structured type proposals against the current Ghidra program.
     PreviewTypes {
@@ -200,11 +198,11 @@ async fn run(cli: Cli) -> Result<()> {
         Command::RecoveryStatus { binary } => {
             use sqlx::Row;
             let rows =
-                sqlx::query("SELECT * FROM recovery_iterations WHERE binary_id=? ORDER BY rowid")
+                sqlx::query("SELECT * FROM automatic_recovery WHERE binary_id=? ORDER BY rowid")
                     .bind(&binary)
                     .fetch_all(&db.pool)
                     .await?;
-            let records:Vec<_>=rows.iter().map(|r|serde_json::json!({"id":r.get::<String,_>("id"),"component":r.get::<String,_>("component_id"),"iteration":r.get::<i64,_>("iteration"),"run_id":r.get::<String,_>("run_id"),"status":r.get::<String,_>("status"),"error":r.get::<String,_>("error")})).collect();
+            let records:Vec<_>=rows.iter().map(|r|serde_json::json!({"id":r.get::<String,_>("id"),"pass":r.get::<i64,_>("pass"),"run_id":r.get::<String,_>("run_id"),"status":r.get::<String,_>("status"),"error":r.get::<String,_>("error")})).collect();
             println!("{}", serde_json::to_string_pretty(&records)?);
         }
         Command::CapturePlan { binary } => println!(
@@ -219,19 +217,8 @@ async fn run(cli: Cli) -> Result<()> {
                 &piston_decompiler::runtime::coverage(&db, &binary).await?
             )?
         ),
-        Command::Recover {
-            binary,
-            iterations,
-            apply_types,
-        } => {
-            let recovery = piston_decompiler::recovery::run(
-                &db,
-                &config,
-                &ai,
-                &binary,
-                iterations,
-                apply_types,
-            );
+        Command::Recover { binary, iterations } => {
+            let recovery = piston_decompiler::recovery::run(&db, &config, &ai, &binary, iterations);
             tokio::pin!(recovery);
             let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
@@ -340,7 +327,11 @@ async fn run(cli: Cli) -> Result<()> {
                         );
                         break;
                     }
-                    pipeline::RunState::Complete => break,
+                    pipeline::RunState::Complete => {
+                        if piston_decompiler::automatic::advance(&db, &config, &binary, 3).await? {
+                            break;
+                        }
+                    }
                 }
             }
             cancel.cancel();

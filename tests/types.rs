@@ -10,6 +10,7 @@ fn plan(fields: Vec<Field>) -> TypePlan {
             fields,
         }],
         signatures: vec![],
+        ..Default::default()
     }
 }
 #[test]

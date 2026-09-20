@@ -50,6 +50,93 @@ public class PistonTypes extends GhidraScript {
         }
         throw new IllegalArgumentException("Unsupported type reference");
     }
+    private JsonObject cpp(JsonObject plan) {
+        return plan.has("cpp") ? plan.getAsJsonObject("cpp") : new JsonObject();
+    }
+    private JsonArray items(JsonObject object,String key) {
+        return object.has(key)?object.getAsJsonArray(key):new JsonArray();
+    }
+    private ghidra.program.model.pcode.HighSymbol localSymbol(JsonObject local) throws Exception {
+        var function=currentProgram.getFunctionManager().getFunctionAt(toAddr(local.get("function").getAsString()));
+        if(function==null) throw new IllegalArgumentException("Local function missing");
+        var decompiler=new ghidra.app.decompiler.DecompInterface();
+        try {
+            decompiler.openProgram(currentProgram);
+            var result=decompiler.decompileFunction(function,60,monitor);
+            if(result.getHighFunction()==null) throw new IllegalStateException("Cannot resolve local variables");
+            var symbols=result.getHighFunction().getLocalSymbolMap().getSymbols();
+            ghidra.program.model.pcode.HighSymbol found=null;
+            while(symbols.hasNext()) {
+                var symbol=symbols.next();
+                String pc=symbol.getPCAddress()==null?"":symbol.getPCAddress().toString();
+                if(!symbol.isParameter() && symbol.getStorage().toString().equals(local.get("storage").getAsString()) && pc.equals(local.get("first_use").getAsString())) {
+                    if(found!=null) throw new IllegalStateException("Ambiguous local identity");
+                    found=symbol;
+                }
+            }
+            if(found==null) throw new IllegalStateException("Local variable identity changed");
+            return found;
+        } finally {decompiler.dispose();}
+    }
+    private JsonObject cppState(JsonObject plan) throws Exception {
+        JsonObject result=new JsonObject();JsonArray classes=new JsonArray(),tables=new JsonArray(),locals=new JsonArray();
+        for(var item:items(cpp(plan),"classes")) {
+            String name=item.getAsJsonObject().get("name").getAsString();
+            classes.add(currentProgram.getOptions("Piston C++ layouts").getString(name,""));
+        }
+        for(var item:items(cpp(plan),"vtables")) {
+            var table=item.getAsJsonObject();var address=toAddr(table.get("address").getAsString());
+            JsonObject value=new JsonObject();var data=getDataAt(address);
+            value.addProperty("type",data==null?"":data.getDataType().getPathName());
+            value.addProperty("bytes",java.util.HexFormat.of().formatHex(getBytes(address,table.getAsJsonArray("targets").size()*currentProgram.getDefaultPointerSize())));
+            JsonArray units=new JsonArray();
+            var end=address.add(table.getAsJsonArray("targets").size()*currentProgram.getDefaultPointerSize()-1);
+            var containing=currentProgram.getListing().getDataContaining(address);
+            if(containing!=null && !containing.getAddress().equals(address)) throw new IllegalStateException("Vtable starts inside existing data");
+            var defined=currentProgram.getListing().getDefinedData(new ghidra.program.model.address.AddressSet(address,end),true);
+            while(defined.hasNext()) {
+                var unit=defined.next();if(unit.getMaxAddress().compareTo(end)>0) throw new IllegalStateException("Vtable ends inside existing data");
+                JsonObject entry=new JsonObject();entry.addProperty("address",unit.getAddress().toString());entry.addProperty("type",unit.getDataType().getPathName());entry.addProperty("length",unit.getLength());units.add(entry);
+            }
+            value.add("defined_data",units);tables.add(value);
+        }
+        for(var item:items(cpp(plan),"locals")) {
+            var symbol=localSymbol(item.getAsJsonObject());JsonObject value=new JsonObject();
+            value.addProperty("name",symbol.getName());value.addProperty("type",symbol.getDataType().getPathName());locals.add(value);
+        }
+        result.add("classes",classes);result.add("vtables",tables);result.add("locals",locals);return result;
+    }
+    private void applyCpp(JsonObject plan) throws Exception {
+        for(var item:items(cpp(plan),"classes")) {
+            var layout=item.getAsJsonObject();String name=layout.get("name").getAsString();
+            if(!(types.get(name) instanceof Structure)) throw new IllegalArgumentException("Missing class structure");
+            if(currentProgram.getSymbolTable().getNamespace(name,currentProgram.getGlobalNamespace())==null)
+                currentProgram.getSymbolTable().createClass(currentProgram.getGlobalNamespace(),name,SourceType.USER_DEFINED);
+            currentProgram.getOptions("Piston C++ layouts").setString(name,layout.toString());
+            types.get(name).setDescription("Evidence-backed C++ layout: "+layout);
+        }
+        int width=currentProgram.getDefaultPointerSize();
+        for(var item:items(cpp(plan),"vtables")) {
+            var table=item.getAsJsonObject();var start=toAddr(table.get("address").getAsString());
+            var targets=table.getAsJsonArray("targets");var type=types.get(table.get("table_type").getAsString());
+            if(type==null || type.getLength()!=targets.size()*width) throw new IllegalArgumentException("Vtable width mismatch");
+            for(int index=0;index<targets.size();index++) {
+                var slot=start.add((long)index*width);long raw=width==8?getLong(slot):Integer.toUnsignedLong(getInt(slot));
+                if(!toAddr(raw).equals(toAddr(targets.get(index).getAsString()))) throw new IllegalStateException("Vtable pointer differs from evidence");
+                if(currentProgram.getFunctionManager().getFunctionAt(toAddr(raw))==null) throw new IllegalStateException("Vtable target is not a known function");
+            }
+            var end=start.add(type.getLength()-1);
+            if(currentProgram.getListing().getInstructions(new ghidra.program.model.address.AddressSet(start,end),true).hasNext()) throw new IllegalStateException("Vtable overlaps instructions");
+            currentProgram.getListing().clearCodeUnits(start,end,false);
+            createData(start,type);
+        }
+        for(var item:items(cpp(plan),"locals")) {
+            var local=item.getAsJsonObject();var symbol=localSymbol(local);
+            if(!symbol.getName().equals(local.get("expected_name").getAsString()) && !symbol.getName().equals(local.get("name").getAsString())) throw new IllegalStateException("Local name changed since evidence capture");
+            ghidra.program.model.pcode.HighFunctionDBUtil.updateDBVariable(symbol,local.get("name").getAsString(),resolve(local.getAsJsonObject("data_type")),SourceType.USER_DEFINED);
+        }
+    }
+
     private JsonObject state(JsonObject plan) throws Exception {
         JsonObject state=new JsonObject();
         state.addProperty("pointer_width",currentProgram.getDefaultPointerSize());
@@ -77,7 +164,7 @@ public class PistonTypes extends GhidraScript {
             JsonObject value=new JsonObject();value.addProperty("prototype",f.getPrototypeString(true,true));value.addProperty("namespace",f.getParentNamespace().getName(true));value.addProperty("convention",f.getCallingConventionName());value.addProperty("variadic",f.hasVarArgs());
             signatures.add(address,value);
         }
-        state.add("signatures",signatures);return state;
+        state.add("signatures",signatures);if(plan.has("cpp")) state.add("cpp",cppState(plan));return state;
     }
     public void verifyApplied() throws Exception {
         String[] args=getScriptArgs();
@@ -96,17 +183,19 @@ public class PistonTypes extends GhidraScript {
         manager=currentProgram.getDataTypeManager();
         JsonObject plan=JsonParser.parseString(Files.readString(Path.of(args[2]))).getAsJsonObject();
         JsonObject report=new JsonObject();
-        if(args[0].equals("preview")) {report.add("expected",state(plan));}
-        else if(args[0].equals("apply")) {
+        boolean preview=args[0].equals("preview");
+        JsonObject before=state(plan);
+        if(preview) report.add("expected",before);
+        if(preview || args[0].equals("apply")) {
             String encoded=gson.toJson(plan);
-            String prior=currentProgram.getOptions("PistonDecompiler").getString(args[1],"");
+            String prior=preview ? "" : currentProgram.getOptions("PistonDecompiler").getString(args[1],"");
             if(!prior.isEmpty() && !prior.equals(encoded)) throw new IllegalStateException("Operation identity conflict");
             if(!prior.isEmpty()) {
                 String appliedState=currentProgram.getOptions("PistonDecompiler").getString(args[1]+".state","");
                 if(appliedState.isEmpty() || !state(plan).equals(JsonParser.parseString(appliedState))) throw new IllegalStateException("Applied values changed outside this operation");
             }
             if(prior.isEmpty()) {
-                JsonObject expected=JsonParser.parseString(Files.readString(Path.of(args[3]))).getAsJsonObject();
+                JsonObject expected=preview ? before : JsonParser.parseString(Files.readString(Path.of(args[3]))).getAsJsonObject();
                 if(!state(plan).equals(expected)) throw new IllegalStateException("Ghidra types or signatures changed since preview");
                 int transaction=currentProgram.startTransaction("Piston type recovery");boolean success=false;
                 try {
@@ -167,12 +256,14 @@ public class PistonTypes extends GhidraScript {
                         JsonObject d=e.getAsJsonObject();DataType type=types.get(d.get("name").getAsString());
                         if(type.getLength()!=d.get("size").getAsInt()) throw new IllegalStateException("Resolved layout size differs from proposal");
                     }
+                    applyCpp(plan);
+                    if(preview) report.addProperty("unchanged",before.equals(state(plan)));
                     currentProgram.getOptions("PistonDecompiler").setString(args[1],encoded);
                     currentProgram.getOptions("PistonDecompiler").setString(args[1]+".state",gson.toJson(state(plan)));
                     success=true;
-                } finally {currentProgram.endTransaction(transaction,success);}
+                } finally {currentProgram.endTransaction(transaction,success && !preview);}
             }
-            report.addProperty("status","applied");report.add("actual",state(plan));
+            report.addProperty("status",preview ? "validated" : "applied");report.add("actual",state(plan));
         } else throw new IllegalArgumentException("Unknown operation mode");
         Files.writeString(Path.of(args[4]),gson.toJson(report));
     }

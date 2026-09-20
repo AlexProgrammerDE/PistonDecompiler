@@ -35,6 +35,7 @@ pub async fn result(db: &Db, id: &str) -> Result<proto::AnalysisResult> {
         dependencies,
         input_json: r.get("input_json"),
         transcript_json: r.get("transcript_json"),
+        automation_json: r.get("automation_json"),
     })
 }
 pub async fn history(db: &Db, function: &str) -> Result<proto::ResultList> {

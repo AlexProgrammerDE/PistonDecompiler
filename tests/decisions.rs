@@ -125,7 +125,7 @@ async fn preprocessing_generation_and_verification_preserve_review_and_accountin
     decisions::prepare(&f.db, &f.ai, "b").await.unwrap();
     generate(&f, "map").await;
     let (job, c) = decision(&f, "verify_map").await;
-    assert_eq!(c.route, "review");
+    assert_eq!(c.route, "validated");
     assert!(c.prompt.candidate.is_some());
     decisions::finish(&f.db, &job, c).await.unwrap();
     let detail = f.db.function("b:1000").await.unwrap();
@@ -222,7 +222,7 @@ async fn unsupported_candidates_escalate_once_and_remain_pending() {
     decisions::finish(&f.db, &job, c).await.unwrap();
     generate(&f, "escalate").await;
     let (job, c) = decision(&f, "verify_escalate").await;
-    assert_eq!(c.route, "needs_review");
+    assert_eq!(c.route, "deferred");
     decisions::finish(&f.db, &job, c).await.unwrap();
     assert!(
         pipeline::claim(&f.db, &f.ai, Some("b"), false)

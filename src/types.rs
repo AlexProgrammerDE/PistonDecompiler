@@ -85,11 +85,13 @@ pub struct Signature {
 #[serde(deny_unknown_fields)]
 pub struct TypePlan {
     #[serde(default)]
+    pub cpp: crate::cpp::CppPlan,
+    #[serde(default)]
     pub definitions: Vec<Definition>,
     #[serde(default)]
     pub signatures: Vec<Signature>,
 }
-fn identifier(name: &str) -> bool {
+pub(crate) fn identifier(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 160
         && name
@@ -99,7 +101,7 @@ fn identifier(name: &str) -> bool {
 }
 impl TypePlan {
     pub fn is_empty(&self) -> bool {
-        self.definitions.is_empty() && self.signatures.is_empty()
+        self.definitions.is_empty() && self.signatures.is_empty() && self.cpp.is_empty()
     }
     pub fn validate(&self, pointer_width: u32) -> Result<()> {
         ensure!(matches!(pointer_width, 4 | 8), "Unsupported pointer width");
@@ -212,10 +214,11 @@ impl TypePlan {
                 );
             }
         }
+        self.cpp.validate(&definitions, pointer_width)?;
         Ok(())
     }
 }
-fn type_size<'a>(
+pub(crate) fn type_size<'a>(
     ty: &'a TypeRef,
     defs: &HashMap<&'a str, &'a Definition>,
     pointer: u32,
@@ -317,6 +320,7 @@ pub async fn preview_many(
     let mut definitions = BTreeMap::new();
     let mut signatures = BTreeMap::new();
     let mut sources = Vec::new();
+    let mut cpp = crate::cpp::CppPlan::default();
     for result in results {
         let row=sqlx::query("SELECT r.*,f.binary_id,f.current_result_id FROM results r JOIN functions f ON f.id=r.function_id WHERE r.id=?").bind(result).fetch_one(&db.pool).await?;
         ensure!(
@@ -333,24 +337,26 @@ pub async fn preview_many(
         binary = Some(owner);
         let analysis: crate::ai::Analysis =
             serde_json::from_str(&row.get::<String, _>("raw_json"))?;
+        cpp.merge(analysis.type_plan.cpp)?;
         for definition in analysis.type_plan.definitions {
             if let Some(old) = definitions.insert(definition.name().to_owned(), definition.clone())
             {
                 ensure!(
                     old == definition,
-                    "Conflicting type definitions require review"
+                    "Conflicting type definitions cannot be merged"
                 );
             }
         }
         for signature in analysis.type_plan.signatures {
             if let Some(old) = signatures.insert(signature.address.clone(), signature.clone()) {
-                ensure!(old == signature, "Conflicting signatures require review");
+                ensure!(old == signature, "Conflicting signatures cannot be merged");
             }
         }
         sources.push(serde_json::json!({"id":result,"revision":row.get::<i64,_>("revision")}));
     }
     let binary = binary.unwrap();
     let type_plan = TypePlan {
+        cpp,
         definitions: definitions.into_values().collect(),
         signatures: signatures.into_values().collect(),
     };
@@ -394,9 +400,11 @@ pub async fn preview_many(
         .as_u64()
         .context("Missing Ghidra pointer width")?;
     type_plan.validate(u32::try_from(pointer)?)?;
-    sqlx::query("INSERT INTO type_operations(id,binary_id,result_id,revision,plan_json,expected_json,sources_json) VALUES(?,?,?,?,?,?,?)")
-        .bind(&id).bind(&binary).bind(&results[0]).bind(sources[0]["revision"].as_i64().unwrap()).bind(&plan).bind(preview["expected"].to_string()).bind(serde_json::to_string(&sources)?).execute(&db.pool).await?;
-    Ok(serde_json::json!({"id":id,"plan":type_plan,"expected":preview["expected"]}))
+    sqlx::query("INSERT INTO type_operations(id,binary_id,result_id,revision,plan_json,expected_json,sources_json,status) VALUES(?,?,?,?,?,?,?,?)")
+        .bind(&id).bind(&binary).bind(&results[0]).bind(sources[0]["revision"].as_i64().unwrap()).bind(&plan).bind(preview["expected"].to_string()).bind(serde_json::to_string(&sources)?).bind(if preview["unchanged"] == true { "unchanged" } else { "preview" }).execute(&db.pool).await?;
+    Ok(
+        serde_json::json!({"id":id,"plan":type_plan,"expected":preview["expected"],"unchanged":preview["unchanged"]}),
+    )
 }
 
 pub async fn apply(db: &crate::db::Db, config: &crate::config::Config, id: &str) -> Result<()> {
@@ -423,10 +431,11 @@ pub async fn apply(db: &crate::db::Db, config: &crate::config::Config, id: &str)
     }
     let busy:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM jobs WHERE binary_id=? AND status IN ('running','batched','uncertain'))+(SELECT COUNT(*) FROM apply_operations WHERE binary_id=? AND status IN ('applying','uncertain'))+(SELECT COUNT(*) FROM type_operations WHERE binary_id=? AND id<>? AND status IN ('applying','uncertain'))").bind(&binary).bind(&binary).bind(&binary).bind(id).fetch_one(&mut *tx).await?;
     ensure!(busy == 0, "Another operation owns this binary");
-    let paused: bool = sqlx::query_scalar("SELECT paused FROM binaries WHERE id=?")
-        .bind(&binary)
-        .fetch_one(&mut *tx)
-        .await?;
+    let paused: bool =
+        sqlx::query_scalar("SELECT paused OR recovery_writer FROM binaries WHERE id=?")
+            .bind(&binary)
+            .fetch_one(&mut *tx)
+            .await?;
     ensure!(paused, "Pause analysis before type writeback");
     let changed=sqlx::query("UPDATE type_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain')").bind(id).execute(&mut *tx).await?.rows_affected();
     ensure!(changed == 1, "Type operation is not ready to apply");

@@ -58,6 +58,34 @@ Recovered definitions live in `/PistonRecovered`.
 The writer uses expected prior definitions and signatures to detect external edits.
 Unknown bytes remain undefined. Existing unrelated Ghidra types remain outside the recovered category.
 
-Unions, bitfields, inheritance metadata, and explicit register or stack parameter storage are not supported by this format yet.
+Unions, bitfields, overlapping subobjects, and explicit register or stack parameter storage are not supported by this format yet.
 Ghidra assigns parameter storage through the selected calling convention.
 The format does not promise complete C++ ABI recovery.
+
+## C++ plans and locals
+
+An optional `cpp` object extends the same validated transaction:
+
+```json
+{
+  "classes": [
+    {"name": "Player", "bases": [{"name": "Entity", "offset": 0, "virtual_base": false}], "vptrs": [{"offset": 0, "table_type": "EntityVtable"}]}
+  ],
+  "vtables": [
+    {"address": "00403000", "table_type": "EntityVtable", "targets": ["00401000", "00401200"]}
+  ],
+  "locals": [
+    {"function": "00401000", "storage": "Stack[-0x10]:4", "first_use": "00401008", "expected_name": "local_10", "name": "remaining_health", "data_type": {"kind": "primitive", "name": "i32"}}
+  ]
+}
+```
+
+Copy local storage and first-use values from exported evidence. The example identities above are illustrative.
+Supply the referenced structure definitions in the enclosing plan.
+Base subobjects must match embedded fields. Vptrs must match pointer fields, including fields inside bases.
+Vtable bindings require supplied static slot evidence and exact matching pointer bytes in Ghidra.
+Class metadata supports fixed observed layouts, including multiple vptrs and virtual-base annotations.
+It does not calculate unknown virtual-base offsets or represent overlapping subobjects.
+
+Each plan permits 128 classes, 128 table bindings, and 256 local refinements.
+Local changes can only target the function under analysis. Conflicting plans are deferred automatically.

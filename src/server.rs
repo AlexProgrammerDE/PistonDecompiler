@@ -512,6 +512,16 @@ pub async fn serve(service: Service) -> Result<()> {
     } else {
         None
     };
+    let recovery = if service.config.ai.configured() {
+        Some(tokio::spawn(crate::automatic::work(
+            service.db.clone(),
+            service.config.clone(),
+            service.ghidra_gate.clone(),
+            service.shutdown.clone(),
+        )))
+    } else {
+        None
+    };
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
@@ -520,6 +530,9 @@ pub async fn serve(service: Service) -> Result<()> {
         .await?;
     if let Some(worker) = worker {
         worker.await?;
+    }
+    if let Some(recovery) = recovery {
+        recovery.await?;
     }
     // Wait for the single Ghidra writer before releasing the data-directory lock.
     let _permit = service.ghidra_gate.acquire().await?;

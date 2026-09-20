@@ -484,16 +484,6 @@
   }
 }
 
-.graph-scroll {
-  overflow: auto;
-  max-height: 560px;
-  border: 1px solid var(--border);
-}
-.function-graph {
-  display: block;
-  width: 100%;
-  min-width: 700px;
-}
 .graph-node {
   cursor: pointer;
 }

@@ -84,7 +84,7 @@ The recorder verifies the saved manifest before it reports `saved`.
 An older open desktop bridge must be closed and reopened after a software update that adds the recording script.
 
 Runtime bytes remain evidence. The system does not replace static program bytes with captured process memory.
-Model proposals still use the existing review, type validation, and Ghidra writeback workflow.
+AI validation, type validation, and Ghidra writeback run automatically after analysis. Unsupported proposals are deferred without manual review.
 
 ## Recover after interruption
 

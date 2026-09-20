@@ -181,7 +181,7 @@ export function BinaryPage() {
           </strong>
         </div>
         <div>
-          <span>Needs review</span>
+          <span>Awaiting validation</span>
           <strong>
             {o ? count(o.proposals) : <Skeleton className="h-6 w-16" />}
           </strong>

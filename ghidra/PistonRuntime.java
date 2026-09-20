@@ -28,6 +28,13 @@ public class PistonRuntime extends GhidraScript {
                     data.get("scenario").getAsString() + ": " + observation.get("events").getAsInt()
                     + " observations. Trace: " + data.get("trace").getAsString());
             }
+            if(data.has("calls")) for(var item:data.getAsJsonArray("calls")) {
+                var call=item.getAsJsonObject();var site=toAddr(call.get("site").getAsString());var target=toAddr(call.get("target").getAsString());
+                var instruction=getInstructionAt(site);
+                if(instruction==null || !instruction.getFlowType().isCall() || !instruction.getFlowType().isComputed() || currentProgram.getFunctionManager().getFunctionAt(target)==null) continue;
+                // Mnemonic references preserve operand references and all observed alternatives.
+                currentProgram.getReferenceManager().addMemoryReference(site,target,ghidra.program.model.symbol.RefType.COMPUTED_CALL,ghidra.program.model.symbol.SourceType.USER_DEFINED,-1);
+            }
             currentProgram.getOptions("Piston runtime evidence").setString(category, manifest);
             commit = true;
         } finally { currentProgram.endTransaction(transaction, commit); }
@@ -38,6 +45,11 @@ public class PistonRuntime extends GhidraScript {
         if (!manifest.equals(currentProgram.getOptions("Piston runtime evidence").getString(category, "")))
             throw new IllegalStateException("Runtime evidence was not saved");
         JsonObject data = JsonParser.parseString(manifest).getAsJsonObject();
+        if(data.has("calls")) for(var item:data.getAsJsonArray("calls")) {
+            var call=item.getAsJsonObject();var site=toAddr(call.get("site").getAsString());var target=toAddr(call.get("target").getAsString());var instruction=getInstructionAt(site);
+            if(instruction==null || !instruction.getFlowType().isCall() || !instruction.getFlowType().isComputed() || currentProgram.getFunctionManager().getFunctionAt(target)==null) continue;
+            if(currentProgram.getReferenceManager().getReference(site,target,-1)==null) throw new IllegalStateException("Observed call reference was not saved");
+        }
         for (JsonElement item : data.getAsJsonArray("functions")) {
             var address = toAddr(item.getAsJsonObject().get("address").getAsString());
             if (currentProgram.getBookmarkManager().getBookmark(address, "Note", category) == null)

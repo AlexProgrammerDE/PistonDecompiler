@@ -4,9 +4,9 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/LICENSE)
 
 PistonDecompiler connects Ghidra's binary analysis to a persistent Rust pipeline and a TanStack web workbench.
-Import a binary, index its functions and call graph, then run bounded AI analysis and review the proposed changes.
+Import a binary, index its functions and call graph, then run automatic AI analysis, validation, and Ghidra recovery.
 
-**Status: active development.** The workbench supports evidence review, corrections, scoped investigations, and previewed Ghidra writeback.
+**Status: active development.** The workbench supports evidence inspection, scoped investigations, and automatic Ghidra writeback.
 Rust tests and a real Ghidra 12.1.3 extraction, apply, and re-export round trip passed on Linux.
 Model quality and large-binary performance remain unmeasured.
 
@@ -23,7 +23,7 @@ Model quality and large-binary performance remain unmeasured.
 - Tailwind animation utilities with reduced-motion support.
 - Configurable provider endpoints, concurrency, context limits, and native provider cost reporting.
 - Asynchronous batch submission, remote ID recovery, and idempotent result collection.
-- Per-field proposal review and exact change previews, with expected-value conflict checks and recoverable Ghidra apply operations.
+- Automatic field validation and Ghidra writeback, with conflict checks, durable operation receipts, and bounded reanalysis.
 - A gRPC-Web API and a Bun/Vite frontend served from the same Rust endpoint.
 - TanStack Router, Query, Store, Table, Form, Pacer, Charts, and development tools.
 
@@ -118,9 +118,8 @@ pistondecompiler inspect FUNCTION_ID
 pistondecompiler run BINARY_ID
 pistondecompiler control BINARY_ID pause
 pistondecompiler control BINARY_ID retry
-pistondecompiler review RESULT_ID --revision REVISION --accept
-pistondecompiler preview BINARY_ID
-pistondecompiler apply OPERATION_ID
+pistondecompiler recover BINARY_ID --iterations 3
+pistondecompiler recovery-status BINARY_ID
 ```
 
 Use `pistondecompiler --help` for the full command list.
@@ -141,7 +140,7 @@ Batch costs remain unknown unless the provider returns billing data.
 `batch abandon` returns a batch that stopped during preparation to the queue.
 If submission started, inspect the provider first. Then use `--confirmed-not-submitted` only when no matching provider batch exists.
 
-## Investigate and review
+## Investigate and recover
 
 Select a function, then open **Investigations** to save a question and its direct call neighborhood.
 Queue that scope and select **Run analysis**. The queue pins evidence and dependency revisions before requests start.
@@ -150,15 +149,16 @@ An active scope holds unrelated queued work. **Include all queued work** restore
 
 Open a result's evidence links to inspect immutable artifacts and cited lines.
 A valid citation proves that the referenced lines were supplied, not that the model's interpretation is correct.
-Accept or reject the name and summary separately. Each decision targets the result revision you inspected.
-A human correction creates a new result and marks dependent conclusions stale.
-Use **Reconsider stale findings** to queue affected functions, or explicitly request deeper evidence analysis.
-With Jev enabled, uncertain proposals can trigger one configured escalation. Repeated convergence is not implemented.
+Names, summaries, and types receive independent AI assessments. Supported fields are applied automatically after the active queue drains.
+Uncertain fields are deferred automatically. They do not create a manual review task or block unrelated fields.
+Ghidra validates type changes in a rolled-back transaction before application.
+Expected-value checks protect changes made outside the operation.
 
-Preview accepted changes before applying them. The saved operation contains exact revisions, old values, and desired values.
-Ghidra reports conflicts when its current name or comment differs from both the expected and desired values.
-Interrupted operations remain uncertain. Open the saved operation and retry it to reconcile the same changes.
-Review is blocked for results in an unresolved apply operation.
+Writeback saves the native Ghidra project and refreshes pseudocode. Affected functions enter another callee-first analysis pass.
+The server allows up to three total analysis passes per recovery cycle. Remaining uncertainty stays visible when the limit is reached.
+Recovery phases and operation IDs persist in SQLite. Interrupted writeback retries the same operation, with three attempts before reporting failure.
+A provider rejection, unavailable Ghidra installation, or exhausted retries can still stop work. These are operational failures, not review requests.
+See [Automatic recovery](docs/architecture/automatic-recovery.md) for state and restart behavior.
 
 ## Upgrading an existing checkout
 

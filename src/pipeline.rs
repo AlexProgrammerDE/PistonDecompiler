@@ -82,7 +82,7 @@ async fn claim_inner(
 ) -> Result<Option<Job>> {
     // Idle workers must not take SQLite's writer lock or evaluate the call graph.
     // Recheck all predicates in the atomic claim below to handle concurrent pauses.
-    let pending: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) AND (?=0 OR j.stage='map'))")
+    let pending: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND b.recovery_writer=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) AND (?=0 OR j.stage='map'))")
         .bind(binary).bind(binary).bind(batch).fetch_one(&db.pool).await?;
     if !pending {
         return Ok(None);
@@ -90,7 +90,7 @@ async fn claim_inner(
     // One write statement claims a row. SQLite serializes competing writers.
     let mut tx = db.pool.begin().await?;
     let stage_filter = if batch { "AND j.stage='map'" } else { "" };
-    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch(),dispatch_id=? WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND {READY} ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts"))
+    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch(),dispatch_id=? WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND b.recovery_writer=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND {READY} ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts"))
         .bind(crate::knowledge::id()).bind(binary).bind(binary).fetch_optional(&mut *tx).await?;
     let Some(job) = row else {
         return Ok(None);
@@ -163,7 +163,7 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
             .await?;
     // Human decisions remain the effective interpretation until explicitly corrected.
     let protected: bool = if let Some(old) = &old {
-        sqlx::query_scalar("SELECT author='human' OR name_review='accepted' OR summary_review='accepted' FROM results WHERE id=?").bind(old).fetch_one(&mut *tx).await?
+        sqlx::query_scalar("SELECT author='human' OR EXISTS(SELECT 1 FROM review_decisions WHERE result_id=results.id) FROM results WHERE id=?").bind(old).fetch_one(&mut *tx).await?
     } else {
         false
     };
@@ -203,7 +203,7 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
         )
         .await?;
     }
-    // Decision verification never accepts a proposal on the user's behalf.
+    // Automatic recovery consumes independent field assessments after the queue drains.
     sqlx::query("INSERT OR IGNORE INTO investigation_findings(investigation_id,result_id) SELECT investigation_id,? FROM analysis_runs WHERE id=(SELECT run_id FROM jobs WHERE id=?) AND investigation_id IS NOT NULL")
         .bind(&result_id).bind(&job.id).execute(&mut *tx).await?;
     sqlx::query("UPDATE investigations SET revision=revision+1 WHERE id=(SELECT investigation_id FROM analysis_runs WHERE id=(SELECT run_id FROM jobs WHERE id=?))").bind(&job.id).execute(&mut *tx).await?;
