@@ -297,6 +297,9 @@ pub(crate) async fn reanalyze_scope(
         .fetch_all(&mut *tx)
         .await?;
     for job in jobs {
+        if question.is_empty() {
+            continue;
+        }
         let prompt = ai
             .investigation_prompt(
                 db,

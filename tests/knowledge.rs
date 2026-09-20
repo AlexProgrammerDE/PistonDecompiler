@@ -32,6 +32,7 @@ fn completion() -> Completion {
             side_effects: vec![],
             uncertainties: vec![],
             type_plan: Default::default(),
+            context_requests: vec![],
         },
         input_tokens: 10,
         output_tokens: 10,
@@ -444,4 +445,27 @@ async fn rejected_summary_is_not_reused_and_invalidates_inflight_dependents() {
             .unwrap()
             .stale
     );
+}
+
+#[tokio::test]
+async fn selected_run_pins_after_callees_and_model_wording_does_not_invalidate() {
+    let (_dir, db, ai) = fixture().await;
+    let leaf = finish_next(&db, &ai).await;
+    let caller = finish_next(&db, &ai).await;
+    knowledge::reanalyze(
+        &db,
+        &ai.config,
+        &proto::ReanalysisRequest {
+            binary_id: "b".into(),
+            function_ids: vec!["b:1000".into(), "b:2000".into()],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let next_leaf = finish_next(&db, &ai).await;
+    assert_ne!(next_leaf.id, leaf.id);
+    assert!(!knowledge::result(&db, &caller.id).await.unwrap().stale);
+    let next_caller = finish_next(&db, &ai).await;
+    assert_eq!(next_caller.dependencies, vec![next_leaf.id]);
 }

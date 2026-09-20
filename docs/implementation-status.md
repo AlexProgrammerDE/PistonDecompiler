@@ -17,7 +17,7 @@ The architecture documents define the target. The current implementation runs re
 - Optional provider JSON Schema responses and numbered evidence for citation checks.
 - Exact Ghidra previews, transactional type changes, class namespaces, and operation reconciliation.
 - Refreshed decompilation without loss of historical evidence, reviews, or accounting.
-- Bounded recovery passes with wider context and early stopping when no new evidence is available.
+- Evidence-driven recovery passes with fixed context budgets and early stopping when native type, execution, and runtime evidence is unchanged.
 - Persistent iteration status through `recovery-status`.
 - C++ pointer-table and RTTI evidence, runtime virtual dispatch, base layouts, typed vtable data, and stable local-variable refinement.
 - Native Ghidra desktop ownership, save verification, and reopening saved projects without replaying definitions.

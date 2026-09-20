@@ -112,6 +112,7 @@ async fn batch_submit_and_partial_collection_preserve_jobs_and_unknown_costs() {
         side_effects: vec![],
         uncertainties: vec![],
         type_plan: Default::default(),
+        context_requests: vec![],
     };
     *output.write().unwrap() = json!({
         "custom_id": jobs[0].get::<String, _>("id"),

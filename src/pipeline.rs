@@ -154,7 +154,7 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
             }
         }
     }
-    sqlx::query("UPDATE results SET extraction_id=?,stale=EXISTS(SELECT 1 FROM result_dependencies d JOIN results dependency ON dependency.id=d.dependency_id JOIN functions f ON f.id=dependency.function_id WHERE d.result_id=results.id AND (dependency.stale=1 OR f.current_result_id<>dependency.id OR dependency.summary_review='rejected') AND NOT EXISTS(SELECT 1 FROM recovery_iterations iteration JOIN jobs own ON own.run_id=iteration.run_id JOIN function_components c ON c.function_id=dependency.function_id WHERE own.id=results.job_id AND c.component_id=iteration.component_id)) WHERE id=?")
+    sqlx::query("UPDATE results SET extraction_id=?,stale=EXISTS(SELECT 1 FROM result_dependencies d JOIN results dependency ON dependency.id=d.dependency_id JOIN functions f ON f.id=dependency.function_id WHERE d.result_id=results.id AND (dependency.stale=1 OR dependency.summary_review='rejected') AND NOT EXISTS(SELECT 1 FROM recovery_iterations iteration JOIN jobs own ON own.run_id=iteration.run_id JOIN function_components c ON c.function_id=dependency.function_id WHERE own.id=results.job_id AND c.component_id=iteration.component_id)) WHERE id=?")
         .bind(input["extraction_id"].as_str().unwrap_or("")).bind(&result_id).execute(&mut *tx).await?;
     let old: Option<String> =
         sqlx::query_scalar("SELECT current_result_id FROM functions WHERE id=?")
@@ -168,12 +168,8 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
         false
     };
     if !protected {
-        if let Some(old) = old {
-            // Results within this recovery iteration share a fixed prior SCC snapshot.
-            // External corrections still use the unconditional invalidation path.
-            sqlx::query("WITH RECURSIVE affected(id) AS (SELECT result_id FROM result_dependencies WHERE dependency_id=? UNION SELECT d.result_id FROM result_dependencies d JOIN affected a ON d.dependency_id=a.id) UPDATE results SET stale=1 WHERE id IN (SELECT id FROM affected) AND NOT EXISTS(SELECT 1 FROM jobs own JOIN recovery_iterations iteration ON iteration.run_id=own.run_id JOIN jobs current ON current.run_id=iteration.run_id WHERE own.id=results.job_id AND current.id=?)")
-                .bind(&old).bind(&job.id).execute(&mut *tx).await?;
-        }
+        // A new interpretation is not new binary evidence. Native type/runtime changes
+        // and explicit corrections invalidate dependents at their source.
         sqlx::query("UPDATE functions SET current_result_id=? WHERE id=?")
             .bind(&result_id)
             .bind(&job.function_id)
@@ -221,9 +217,12 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
 }
 pub async fn fail(db: &Db, ai: &Ai, job: &Job, error: &str) -> Result<()> {
     let mut tx = db.pool.begin().await?;
+    let permanent = error.starts_with("Analysis validation failed")
+        || error.contains("400 Bad Request")
+        || error.contains("Decision request exceeds context limit");
     let limit_reached = error.contains("Provider spending limit reached (HTTP 402)");
     sqlx::query("UPDATE jobs SET status=?,error=?,available_at=unixepoch()+?,updated_at=unixepoch() WHERE id=? AND status IN ('running','batched')")
-        .bind(if limit_reached || job.attempts < i64::from(ai.config.max_attempts) { "queued" } else { "failed" })
+        .bind(if limit_reached || (!permanent && job.attempts < i64::from(ai.config.max_attempts)) { "queued" } else { "failed" })
         .bind(error).bind(5_i64 * 2_i64.pow(job.attempts.min(10) as u32)).bind(&job.id).execute(&mut *tx).await?;
     if limit_reached {
         sqlx::query("UPDATE binaries SET paused=1 WHERE id=?")

@@ -337,8 +337,15 @@ pub async fn preview_many(
         binary = Some(owner);
         let analysis: crate::ai::Analysis =
             serde_json::from_str(&row.get::<String, _>("raw_json"))?;
-        cpp.merge(analysis.type_plan.cpp)?;
-        for definition in analysis.type_plan.definitions {
+        let audit: serde_json::Value =
+            serde_json::from_str(&row.get::<String, _>("automation_json"))?;
+        let plan: TypePlan = audit
+            .get("accepted_plan")
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()?
+            .unwrap_or(analysis.type_plan);
+        cpp.merge(plan.cpp)?;
+        for definition in plan.definitions {
             if let Some(old) = definitions.insert(definition.name().to_owned(), definition.clone())
             {
                 ensure!(
@@ -347,7 +354,7 @@ pub async fn preview_many(
                 );
             }
         }
-        for signature in analysis.type_plan.signatures {
+        for signature in plan.signatures {
             if let Some(old) = signatures.insert(signature.address.clone(), signature.clone()) {
                 ensure!(old == signature, "Conflicting signatures cannot be merged");
             }

@@ -1,6 +1,6 @@
 use axum::{Json, Router, routing::post};
 use piston_decompiler::{
-    ai::{Ai, Prompt},
+    ai::Ai,
     config::{AiConfig, DecisionConfig},
     db::Db,
     decisions, ghidra, pipeline, proto,
@@ -203,25 +203,15 @@ async fn insufficient_evidence_defers_without_inventing_a_result() {
             .await
             .unwrap();
     assert_eq!(stage, "preprocess");
-    assert!(
-        serde_json::from_str::<Prompt>(&input)
-            .unwrap()
-            .config
-            .decisions
-            .is_some()
-    );
+    assert!(input.is_empty()); // Pin after callees complete, not at scheduling time.
 }
 #[tokio::test]
-async fn unsupported_candidates_escalate_once_and_remain_pending() {
+async fn unsupported_candidates_do_not_trigger_paid_escalation() {
     let f = fixture(false, false, false, true).await;
     let (job, c) = decision(&f, "preprocess").await;
     decisions::finish(&f.db, &job, c).await.unwrap();
     generate(&f, "map").await;
     let (job, c) = decision(&f, "verify_map").await;
-    assert_eq!(c.route, "escalate");
-    decisions::finish(&f.db, &job, c).await.unwrap();
-    generate(&f, "escalate").await;
-    let (job, c) = decision(&f, "verify_escalate").await;
     assert_eq!(c.route, "deferred");
     decisions::finish(&f.db, &job, c).await.unwrap();
     assert!(

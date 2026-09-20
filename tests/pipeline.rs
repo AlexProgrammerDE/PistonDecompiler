@@ -34,6 +34,7 @@ fn completion() -> Completion {
             side_effects: vec![],
             uncertainties: vec![],
             type_plan: Default::default(),
+            context_requests: vec![],
         },
         input_tokens: 100,
         output_tokens: 20,
@@ -354,7 +355,7 @@ async fn callers_wait_for_callee_verification_but_recursive_members_do_not_deadl
 }
 
 #[tokio::test]
-async fn validation_retry_adds_feedback_without_replacing_pinned_evidence() {
+async fn invalid_type_proposal_is_omitted_without_repeating_paid_analysis() {
     use axum::{Json, Router, routing::post};
     use std::sync::{
         Arc,
@@ -389,35 +390,23 @@ async fn validation_retry_adds_feedback_without_replacing_pinned_evidence() {
         .await
         .unwrap()
         .unwrap();
-    let error = ai.analyze_job(&db, &job).await.err().unwrap();
+    let result = ai.analyze_job(&db, &job).await.unwrap();
+    assert!(result.analysis.type_plan.is_empty());
+    assert!(!result.analysis.claims.is_empty());
     let pinned: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
         .bind(&job.id)
         .fetch_one(&db.pool)
         .await
         .unwrap();
-    pipeline::fail(&db, &ai, &job, &format!("{error:#}"))
-        .await
-        .unwrap();
-    sqlx::query("UPDATE jobs SET available_at=0 WHERE id=?")
-        .bind(&job.id)
-        .execute(&db.pool)
-        .await
-        .unwrap();
-    let retry = pipeline::claim(&db, &ai, Some("b"), false)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(retry.id, job.id);
-    let result = ai.analyze_job(&db, &retry).await.unwrap();
-    pipeline::finish(&db, &ai, &retry, result).await.unwrap();
+    pipeline::finish(&db, &ai, &job, result).await.unwrap();
     let unchanged: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
         .bind(&job.id)
         .fetch_one(&db.pool)
         .await
         .unwrap();
     assert_eq!(unchanged, pinned);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(db.overview("b").await.unwrap().cost_usd, Some(0.002));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(db.overview("b").await.unwrap().cost_usd, Some(0.001));
     server.abort();
 }
 

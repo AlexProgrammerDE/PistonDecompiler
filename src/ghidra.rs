@@ -560,13 +560,13 @@ pub async fn refresh_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
             "Duplicate function in refreshed extraction"
         );
         let id = format!("{binary}:{}", f.address);
-        let old: (String, String, Option<String>) = sqlx::query_as(
-            "SELECT pseudocode,type_context,current_result_id FROM functions WHERE id=?",
-        )
-        .bind(&id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if (old.0 != f.pseudocode || old.1 != f.type_context)
+        let old: (String, String, Option<String>) =
+            sqlx::query_as("SELECT pcode,type_context,current_result_id FROM functions WHERE id=?")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if (old.0 != f.pcode
+            || crate::refinement::types(&old.1) != crate::refinement::types(&f.type_context))
             && let Some(result) = old.2
         {
             sqlx::query("UPDATE results SET stale=1 WHERE id=?")
