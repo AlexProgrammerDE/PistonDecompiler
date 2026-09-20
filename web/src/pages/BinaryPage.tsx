@@ -1,3 +1,4 @@
+import { Recordings } from "@/components/Recordings"
 import { ProgressReport } from "@/components/ProgressReport"
 import { InvestigationWorkbench } from "@/components/InvestigationWorkbench"
 import { ApplyChanges } from "@/components/ApplyChanges"
@@ -36,9 +37,16 @@ import {
 } from "@/components/ui/table"
 const UsageChart = lazy(() => import("@/components/UsageChart"))
 export type BinaryView =
-  "functions" | "pipeline" | "usage" | "events" | "investigations" | "live"
+  | "functions"
+  | "pipeline"
+  | "usage"
+  | "events"
+  | "investigations"
+  | "live"
+  | "recordings"
 const views: { id: BinaryView; label: string }[] = [
   { id: "functions", label: "Functions" },
+  { id: "recordings", label: "Recordings" },
   { id: "investigations", label: "Investigations" },
   { id: "live", label: "Live graph" },
   { id: "pipeline", label: "Pipeline" },
@@ -179,13 +187,9 @@ export function BinaryPage() {
           </strong>
         </div>
         <div>
-          <span>Accounted / budget</span>
+          <span>Reported cost</span>
           <strong>
-            {o ? (
-              `${money(o.costUsd)} / ${money(o.budgetUsd)}`
-            ) : (
-              <Skeleton className="h-6 w-24" />
-            )}
+            {o ? money(o.costUsd) : <Skeleton className="h-6 w-24" />}
           </strong>
         </div>
       </div>
@@ -211,6 +215,7 @@ export function BinaryPage() {
           </Link>
         ))}
       </nav>
+      {view === "recordings" ? <Recordings binaryId={binaryId} /> : null}
       {view === "functions" ? (
         <div className="workbench">
           <FunctionTable
@@ -243,7 +248,8 @@ export function BinaryPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             Pause stops new requests. Active requests finish and save their
-            results. Retries retain conservative charges for uncertain requests.
+            results. Retrying an uncertain request can incur another provider
+            charge.
           </p>
           <Table>
             <TableHeader>
@@ -293,28 +299,17 @@ export function BinaryPage() {
               <dd>{count(o?.inputTokens ?? 0n)}</dd>
               <dt>Output tokens</dt>
               <dd>{count(o?.outputTokens ?? 0n)}</dd>
-              <dt>Accounted cost</dt>
-              <dd>{money(o?.costUsd ?? 0)}</dd>
-              <dt>Reserved for active requests</dt>
-              <dd>{money(o?.reservedUsd ?? 0)}</dd>
-              <dt>Available budget</dt>
-              <dd>
-                {money(
-                  Math.max(
-                    0,
-                    (o?.budgetUsd ?? 0) -
-                      (o?.costUsd ?? 0) -
-                      (o?.reservedUsd ?? 0)
-                  )
-                )}
-              </dd>
+              <dt>Provider-reported cost</dt>
+              <dd>{money(o?.costUsd)}</dd>
+              <dt>Requests without reported cost</dt>
+              <dd>{o?.unreportedCostRequests ?? "Loading"}</dd>
               <dt>Graph modules</dt>
               <dd>{o?.modules ?? 0}</dd>
             </dl>
             <p>
-              Accounted cost includes token-based estimates and conservative
-              charges for requests without a confirmed usage report. Provider
-              billing remains authoritative.
+              Only charges returned by the provider are included. Requests
+              without billing data remain unknown, so the reported subtotal can
+              be incomplete. Spending limits are managed by your provider.
             </p>
           </section>
           <Table>
@@ -324,7 +319,8 @@ export function BinaryPage() {
                 <TableHead>Requests</TableHead>
                 <TableHead>Input</TableHead>
                 <TableHead>Output</TableHead>
-                <TableHead>Cost</TableHead>
+                <TableHead>Reported cost</TableHead>
+                <TableHead>Cost unknown</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -335,6 +331,7 @@ export function BinaryPage() {
                   <TableCell>{count(p.inputTokens)}</TableCell>
                   <TableCell>{count(p.outputTokens)}</TableCell>
                   <TableCell>{money(p.costUsd)}</TableCell>
+                  <TableCell>{p.unreportedCostRequests}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -349,7 +346,8 @@ export function BinaryPage() {
                   <TableHead>Requests</TableHead>
                   <TableHead>Average latency</TableHead>
                   <TableHead>Input / output</TableHead>
-                  <TableHead>Cost</TableHead>
+                  <TableHead>Reported cost</TableHead>
+                  <TableHead>Cost unknown</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -359,20 +357,23 @@ export function BinaryPage() {
                     <TableCell>{item.stage}</TableCell>
                     <TableCell>{count(item.requests)}</TableCell>
                     <TableCell>
-                      {Math.round(item.averageLatencyMs).toLocaleString()} ms
+                      {item.averageLatencyMs === undefined
+                        ? "Unknown"
+                        : `${Math.round(item.averageLatencyMs).toLocaleString()} ms`}
                     </TableCell>
                     <TableCell>
                       {count(item.inputTokens)} / {count(item.outputTokens)}
                     </TableCell>
                     <TableCell>{money(item.costUsd)}</TableCell>
+                    <TableCell>{item.unreportedCostRequests}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
             {o?.providerBreakdowns.length === 0 ? (
               <EmptyNotice
-                title="No completed provider requests"
-                description="Model latency and cost appear after analysis results are stored."
+                title="No provider requests"
+                description="Usage appears when the provider returns a response."
               />
             ) : null}
           </section>
@@ -433,7 +434,7 @@ function Jobs({ binaryId }: { binaryId: string }) {
                   : "No timing data"}
               </TableCell>
               <TableCell className="max-w-lg whitespace-normal">
-                {job.error || `${money(job.reservedUsd)} reserved`}
+                {job.error || ""}
               </TableCell>
             </TableRow>
           ))}

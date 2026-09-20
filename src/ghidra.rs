@@ -28,6 +28,23 @@ pub struct ExportFunction {
     pub callees: Vec<String>,
     pub thunk: bool,
     pub external: bool,
+    pub external_thunk: bool,
+    pub executable: Option<bool>,
+}
+impl ExportFunction {
+    fn skip_reason(&self) -> &'static str {
+        if self.external {
+            "external"
+        } else if self.external_thunk {
+            "external import thunk"
+        } else if self.executable == Some(false) {
+            "non-executable import or data entry"
+        } else if self.pseudocode.is_empty() && self.disassembly.is_empty() {
+            "code unavailable"
+        } else {
+            ""
+        }
+    }
 }
 pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
     let dir = config.data_dir.join("scripts");
@@ -45,6 +62,11 @@ pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
     tokio::fs::write(
         dir.join("PistonTypes.java"),
         include_str!("../ghidra/PistonTypes.java"),
+    )
+    .await?;
+    tokio::fs::write(
+        dir.join("PistonRuntime.java"),
+        include_str!("../ghidra/PistonRuntime.java"),
     )
     .await?;
     Ok(tokio::fs::canonicalize(dir).await?)
@@ -319,13 +341,7 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         );
         let id = format!("{binary}:{}", f.address);
         let fingerprint = hex::encode(Sha256::digest(f.pseudocode.as_bytes()));
-        let skip = if f.external {
-            "external"
-        } else if f.pseudocode.is_empty() && f.disassembly.is_empty() {
-            "code unavailable"
-        } else {
-            ""
-        };
+        let skip = f.skip_reason();
         sqlx::query("INSERT INTO functions(id,binary_id,address,name,size,pseudocode,disassembly,pcode,strings_json,imports_json,skip_reason,fingerprint) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
             .bind(&id).bind(binary).bind(&f.address).bind(&f.name).bind(f.size).bind(&f.pseudocode).bind(&f.disassembly).bind(&f.pcode)
             .bind(serde_json::to_string(&f.strings)?).bind(serde_json::to_string(&f.imports)?).bind(skip).bind(fingerprint).execute(&mut *tx).await?;
@@ -564,6 +580,14 @@ pub async fn refresh_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
             .bind(&id)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("UPDATE functions SET skip_reason=? WHERE id=?")
+            .bind(f.skip_reason())
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        if !f.skip_reason().is_empty() {
+            sqlx::query("UPDATE jobs SET status='completed',error=? WHERE function_id=? AND status='queued'").bind(format!("Skipped: {}",f.skip_reason())).bind(&id).execute(&mut *tx).await?;
+        }
         let changed=sqlx::query("UPDATE functions SET name=?,comment=?,pseudocode=?,disassembly=?,pcode=?,fingerprint=? WHERE id=? AND binary_id=?")
             .bind(&f.name).bind(&f.comment).bind(&f.pseudocode).bind(&f.disassembly).bind(&f.pcode).bind(hex::encode(Sha256::digest(f.pseudocode.as_bytes()))).bind(&id).bind(binary).execute(&mut *tx).await?.rows_affected();
         ensure!(

@@ -17,7 +17,7 @@ async fn fixture(script: &str) -> (tempfile::TempDir, Db, Config) {
     std::fs::write(&executable, script).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
     let db = Db::open(&data.join("piston.db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','fixture','sha',7,'x86','ELF',?,1.0)")
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES('b','fixture','sha',7,'x86','ELF',?)")
         .bind(binary.join("program.bin").to_string_lossy().as_ref())
         .execute(&db.pool)
         .await

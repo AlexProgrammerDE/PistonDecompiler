@@ -53,6 +53,7 @@ const binary = createRoute({
   ): { view: BinaryView; functionId?: string } => ({
     view: [
       "functions",
+      "recordings",
       "pipeline",
       "usage",
       "events",

@@ -1,4 +1,4 @@
-//! Explicit, budgeted orchestration of analysis, type writeback, and fresh decompilation.
+//! Explicit, bounded orchestration of analysis, type writeback, and fresh decompilation.
 use crate::{ai::Ai, config::Config, db::Db, pipeline, types};
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
@@ -17,10 +17,7 @@ pub async fn run(
         (1..=5).contains(&max_iterations),
         "Recovery requires 1 to 5 iterations"
     );
-    ensure!(
-        ai.config.configured(),
-        "Configure the model, key, and request prices first"
-    );
+    ensure!(ai.config.configured(), "Configure the model and key first");
     let active:i64=sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE binary_id=? AND status IN ('running','batched','uncertain')").bind(binary).fetch_one(&db.pool).await?;
     ensure!(
         active == 0,
@@ -271,7 +268,7 @@ async fn analyze_run(db: &Db, ai: &Ai, binary: &str, run: &str) -> Result<()> {
     loop {
         ensure!(
             !db.overview(binary).await?.paused,
-            "Recovery paused at its budget limit"
+            "Recovery paused. Check pipeline status before resuming."
         );
         let mut jobs = Vec::new();
         for _ in 0..ai.config.concurrency {

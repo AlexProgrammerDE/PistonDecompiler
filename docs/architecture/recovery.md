@@ -50,4 +50,4 @@ The ranking is a heuristic, not a claimed probability of discovery.
 The collector runs beside the target process. Ghidra and the model do not execute arbitrary instructions from a proposal.
 The model receives bounded evidence, not unrestricted process access.
 Imported trace data and binary strings are untrusted inputs.
-The existing request accounting and investigation budgets apply to every model iteration.
+Each model iteration retains native provider receipts. The scheduler has no local dollar limit.

@@ -10,15 +10,13 @@ use sqlx::Row;
 async fn fixture() -> (tempfile::TempDir, Db, Ai) {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("test.db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd,paused) VALUES('b','fixture','sha',10,'x86','ELF','unused',1.0,0)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,paused) VALUES('b','fixture','sha',10,'x86','ELF','unused',0)").execute(&db.pool).await.unwrap();
     let functions = (0..8).map(|i|json!({"address":format!("{i:08x}"),"name":format!("fn_{i}"),"size":32,"pseudocode":format!("int fn_{i}(int n) {{ return n + {i}; }}"),"callees":if i>0 {vec![format!("{:08x}",i-1)]} else {vec![]}}).to_string()).collect::<Vec<_>>().join("\n");
     let path = dir.path().join("functions.jsonl");
     std::fs::write(&path, functions).unwrap();
     ghidra::import_export(&db, "b", &path).await.unwrap();
     let ai = Ai::new(AiConfig {
         model: "fixture".into(),
-        input_usd_per_million: 1.0,
-        output_usd_per_million: 2.0,
         ..Default::default()
     })
     .unwrap();
@@ -39,16 +37,34 @@ fn completion() -> Completion {
         },
         input_tokens: 100,
         output_tokens: 20,
-        cost: 0.00014,
+        cost: Some(0.00014),
         latency_ms: 10,
         prompt_hash: "hash".into(),
         model: "fixture".into(),
     }
 }
 #[tokio::test]
-async fn concurrent_claims_are_unique_and_reservations_bound_spend() {
+async fn paused_workers_do_not_wait_for_the_writer_lock() {
     let (_dir, db, ai) = fixture().await;
-    // This budget test exercises independent components. Chains are tested separately.
+    sqlx::query("UPDATE binaries SET paused=1")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let transaction = db.pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    let claimed = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        pipeline::claim(&db, &ai, None, false),
+    )
+    .await
+    .expect("Idle workers should only read the queue")
+    .unwrap();
+    assert!(claimed.is_none());
+    transaction.rollback().await.unwrap();
+}
+#[tokio::test]
+async fn concurrent_claims_are_unique_without_cost_gates() {
+    let (_dir, db, ai) = fixture().await;
+    // This test exercises independent components. Chains are tested separately.
     sqlx::query("DELETE FROM edges")
         .execute(&db.pool)
         .await
@@ -58,26 +74,20 @@ async fn concurrent_claims_are_unique_and_reservations_bound_spend() {
         .await
         .unwrap();
     tx.commit().await.unwrap();
-    let reservation = ai.reservation("map", false);
-    sqlx::query("UPDATE binaries SET budget_usd=? WHERE id='b'")
-        .bind(reservation * 3.1)
-        .execute(&db.pool)
-        .await
-        .unwrap();
     let claims =
         futures::future::join_all((0..8).map(|_| pipeline::claim(&db, &ai, None, false))).await;
     let jobs: Vec<_> = claims.into_iter().filter_map(Result::unwrap).collect();
-    assert_eq!(jobs.len(), 3);
+    assert_eq!(jobs.len(), 8);
     assert_eq!(
         jobs.iter()
             .map(|j| &j.id)
             .collect::<std::collections::HashSet<_>>()
             .len(),
-        3
+        8
     );
     let overview = db.overview("b").await.unwrap();
-    assert!(overview.reserved_usd + overview.cost_usd <= overview.budget_usd);
-    assert!(overview.paused);
+    assert_eq!(overview.cost_usd, None);
+    assert!(!overview.paused);
 }
 #[tokio::test]
 async fn completion_is_idempotent_without_automatic_second_pass() {
@@ -86,6 +96,10 @@ async fn completion_is_idempotent_without_automatic_second_pass() {
         .await
         .unwrap()
         .unwrap();
+    let receipt = piston_decompiler::billing::dispatch(&db, &job.id)
+        .await
+        .unwrap();
+    piston_decompiler::billing::record(&db, Some(&receipt), &json!({"model":"fixture","usage":{"prompt_tokens":100,"completion_tokens":20,"cost":0.00014}})).await.unwrap();
     pipeline::finish(&db, &ai, &job, completion())
         .await
         .unwrap();
@@ -95,12 +109,12 @@ async fn completion_is_idempotent_without_automatic_second_pass() {
     let overview = db.overview("b").await.unwrap();
     assert_eq!(overview.analyzed, 1);
     assert_eq!(overview.input_tokens, 100);
-    assert!(overview.reserved_usd.abs() < 1e-9);
+    assert_eq!(overview.cost_usd, Some(0.00014));
     assert_eq!(overview.provider_breakdowns.len(), 1);
     assert_eq!(overview.provider_breakdowns[0].model, "fixture");
     assert_eq!(overview.provider_breakdowns[0].stage, "map");
     assert_eq!(overview.provider_breakdowns[0].requests, 1);
-    assert_eq!(overview.provider_breakdowns[0].average_latency_ms, 10.0);
+    assert_eq!(overview.provider_breakdowns[0].average_latency_ms, None);
     let next = pipeline::claim(&db, &ai, None, false)
         .await
         .unwrap()
@@ -119,11 +133,14 @@ async fn completion_is_idempotent_without_automatic_second_pass() {
     assert_eq!(result.functions[0].id, job.function_id);
 }
 #[tokio::test]
-async fn restart_preserves_uncertain_spend_and_explicit_retry_accounts_for_it() {
+async fn restart_and_retry_preserve_unknown_receipts_without_inventing_cost() {
     let (_dir, db, ai) = fixture().await;
     let job = pipeline::claim(&db, &ai, None, false)
         .await
         .unwrap()
+        .unwrap();
+    piston_decompiler::billing::dispatch(&db, &job.id)
+        .await
         .unwrap();
     db.recover().await.unwrap();
     assert_eq!(
@@ -133,15 +150,15 @@ async fn restart_preserves_uncertain_spend_and_explicit_retry_accounts_for_it() 
     let recovered = db.overview("b").await.unwrap();
     assert!(recovered.paused);
     assert_eq!(recovered.failed, 1);
-    assert_eq!(recovered.reserved_usd, job.reserved_usd);
+    assert_eq!(recovered.unreported_cost_requests, 1);
     pipeline::control(&db, &ai, "b", "retry").await.unwrap();
     let retried = db.overview("b").await.unwrap();
-    assert_eq!(retried.reserved_usd, 0.0);
-    assert_eq!(retried.cost_usd, job.reserved_usd);
+    assert_eq!(retried.unreported_cost_requests, 1);
+    assert_eq!(retried.cost_usd, None);
     assert_eq!(retried.queued, 8);
 }
 #[tokio::test]
-async fn failed_request_retains_conservative_charge_and_backoff() {
+async fn failed_request_keeps_unknown_cost_and_backoff() {
     let (_dir, db, ai) = fixture().await;
     let job = pipeline::claim(&db, &ai, None, false)
         .await
@@ -154,8 +171,8 @@ async fn failed_request_retains_conservative_charge_and_backoff() {
         .await
         .unwrap();
     let overview = db.overview("b").await.unwrap();
-    assert_eq!(overview.cost_usd, job.reserved_usd);
-    assert_eq!(overview.reserved_usd, 0.0);
+    assert_eq!(overview.cost_usd, None);
+
     let row = sqlx::query("SELECT available_at>unixepoch() AS delayed FROM jobs WHERE id=?")
         .bind(job.id)
         .fetch_one(&db.pool)
@@ -200,7 +217,7 @@ async fn evidence_agent_uses_bounded_tools_and_accounts_all_rounds() {
             assert!(body["messages"].as_array().unwrap().len()>=2);
             assert_eq!(body["messages"][0]["role"],"system");
             let message=if index==0 {json!({"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"inspect_function","arguments":"{\"address\":\"00000000\",\"kind\":\"pseudocode\"}"}}]})} else {json!({"role":"assistant","content":({let mut analysis=completion().analysis; let user=body["messages"].as_array().unwrap().iter().find(|m|m["role"]=="user").unwrap(); let content=user["content"].as_str().map(str::to_owned).unwrap_or_else(||user["content"][0]["text"].as_str().unwrap().to_owned());let context:serde_json::Value=serde_json::from_str(&content).unwrap();analysis.claims=vec![piston_decompiler::ai::Claim{text:"Adds a constant.".into(),references:vec![piston_decompiler::ai::EvidenceReference{artifact_id:context["evidence"][0]["artifact_id"].as_str().unwrap().into(),start_line:1,end_line:1}]}];serde_json::to_string(&analysis).unwrap()})})};
-            Json(json!({"id":"fixture-response","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"finish_reason":"stop","message":message}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}))
+            Json(json!({"id":"fixture-response","object":"chat.completion","created":1,"model":"fixture","choices":[{"index":0,"finish_reason":"stop","message":message}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"cost":0.00014}}))
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -208,8 +225,6 @@ async fn evidence_agent_uses_bounded_tools_and_accounts_all_rounds() {
     // An existing nonsecret environment variable exercises bearer-key loading without global mutation.
     ai.config.api_key_env = "USER".into();
     ai.config.escalation_model = "fixture".into();
-    ai.config.escalation_input_usd_per_million = 1.0;
-    ai.config.escalation_output_usd_per_million = 2.0;
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let result = ai
         .analyze(&db, "b", "b:00000001", "escalate")
@@ -218,7 +233,7 @@ async fn evidence_agent_uses_bounded_tools_and_accounts_all_rounds() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(result.input_tokens, 200);
     assert_eq!(result.output_tokens, 40);
-    assert!(result.cost < ai.reservation("escalate", false));
+    assert_eq!(result.cost, Some(0.00028));
     server.abort();
 }
 

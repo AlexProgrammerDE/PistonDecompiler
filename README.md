@@ -15,13 +15,13 @@ Model quality and large-binary performance remain unmeasured.
 - Immutable binary snapshots, SHA-256 identity, and ELF, PE, Mach-O, and COFF metadata.
 - Ghidra headless export of pseudocode, assembly, P-code, strings, imports, and call edges.
 - SQLite persistence, full-text function search, graph neighborhoods, and resumable jobs.
-- Bounded Tokio workers and Rig-powered AI requests with pinned inputs, dependency summaries, and read-only evidence tools.
+- Bounded Tokio workers and AI requests with pinned inputs, dependency summaries, and read-only evidence tools.
 - Optional Jev preprocessing and candidate assessment through the OpenRouter Decisions API.
 - Immutable extraction artifacts, linked evidence, result history, and human corrections with downstream invalidation.
 - Saved investigations with questions, notes, findings, scope, and durable spending limits.
 - Live event replay, a Three.js call graph with a keyboard-accessible 2D view, and Motion transitions.
 - Tailwind animation utilities with reduced-motion support.
-- Configurable provider endpoints, prices, concurrency, context limits, and budget reservations.
+- Configurable provider endpoints, concurrency, context limits, and native provider cost reporting.
 - Asynchronous batch submission, remote ID recovery, and idempotent result collection.
 - Per-field proposal review and exact change previews, with expected-value conflict checks and recoverable Ghidra apply operations.
 - A gRPC-Web API and a Bun/Vite frontend served from the same Rust endpoint.
@@ -48,7 +48,7 @@ bun run build
 Open [the local workbench](http://127.0.0.1:7070).
 Import a binary, then select **Extract with Ghidra**.
 
-Before AI analysis, configure a model and its current token prices in `pistondecompiler.toml`.
+Before AI analysis, configure a model and API key in `pistondecompiler.toml`.
 Copy `.env.example` to `.env` and enter your OpenRouter key as `PISTONDECOMPILER_AI_API_KEY`.
 The CLI loads `.env` beside the selected configuration file before starting its workers.
 Existing environment variables take precedence. Local `.env` files are ignored by Git.
@@ -73,15 +73,13 @@ Add this table to `pistondecompiler.toml` to enable decision routing:
 [ai.decisions]
 endpoint = "https://openrouter.ai/api/alpha/decisions"
 model = "typesafe/jev-1.13"
-input_usd_per_million = 0.042
-output_usd_per_million = 0.0
 confidence_threshold = 0.95
 max_input_bytes = 96000
 ```
 
 The decision client uses the same `ai.api_key_env` as generation.
 The Decisions endpoint differs from the chat-completions endpoint.
-Verify current prices in the [OpenRouter model catalog](https://openrouter.ai/typesafe/jev-1.13) before a large run.
+Set spending limits on your OpenRouter key. The application does not impose a local dollar limit.
 
 Each new analysis scope starts with `preprocess`.
 Jev classifies the function's role, evidence sufficiency, and complexity against pinned Ghidra evidence.
@@ -99,7 +97,7 @@ Assessments never accept proposals or apply changes to Ghidra.
 
 Open **Assessments** in the function view to inspect these decisions.
 The `inspect FUNCTION_ID` command also includes requests, responses, evidence identity, usage, and routes.
-Each stage reserves its own budget before dispatch. Decisions use reported cost when available, otherwise configured token rates.
+Each stage stores the provider response before validating its content. Costs come only from the response’s `usage.cost` field.
 
 On resume, untouched initial jobs enter preprocessing. Existing pinned jobs retain their original inputs.
 Tiny functions, thunks, and identical pseudocode retain separate identities and remain eligible for analysis.
@@ -139,7 +137,7 @@ pistondecompiler batch abandon BATCH_ID
 
 Enable `ai.batch_enabled` and verify the provider's endpoint behavior first.
 The current adapter uses `/files`, `/batches`, and a 24-hour completion window.
-A batch discount is never assumed. Configure `batch_price_multiplier` for your endpoint.
+Batch costs remain unknown unless the provider returns billing data.
 `batch abandon` returns a batch that stopped during preparation to the queue.
 If submission started, inspect the provider first. Then use `--confirmed-not-submitted` only when no matching provider batch exists.
 
@@ -173,9 +171,15 @@ The review and apply API requests changed; rebuild the frontend and backend toge
 
 ## Accounting and limitations
 
-The scheduler reserves estimated maximum request costs before dispatch.
-A request without confirmed usage retains a conservative charge.
-Provider prices, token usage reports, and invoices determine actual billing.
+Cost tracking is retrospective. The scheduler does not reserve money or estimate request prices.
+The database retains raw provider receipts, including charges for responses that fail analysis validation.
+Missing cost stays unknown; an explicit zero remains zero. Displayed subtotals include only reported charges.
+OpenRouter enforces its key limit. An HTTP 402 response pauses the affected binary until you resume it.
+
+Remove `budget_usd`, all `*_usd_per_million` fields, and `batch_price_multiplier` from your configuration.
+The migration removes local budget and reservation columns and discards historical estimated totals.
+It preserves native decision receipts and marks older chat costs unknown because those receipts were not saved.
+Older failed requests without saved receipts cannot be included in the subtotal. Check OpenRouter for the complete bill.
 
 Ghidra runs as a subprocess under your account. PistonDecompiler does not sandbox Ghidra or execute the imported program.
 The server binds to loopback and currently has no user authentication.
@@ -194,7 +198,7 @@ bun run --cwd web typecheck
 bun run --cwd web build
 ```
 
-Rust integration tests exercise queue concurrency, reservations, recovery, idempotency, search, and bounded evidence tools with a local mock provider.
+Rust integration tests exercise queue concurrency, native billing receipts, recovery, idempotency, search, and bounded evidence tools with a local mock provider.
 The [evaluation corpus](https://github.com/AlexProgrammerDE/PistonDecompiler/tree/main/fixtures/evaluation) provides optimized and stripped variants, a behavioral rubric, and a repeatable review procedure.
 The [sample C program](https://github.com/AlexProgrammerDE/PistonDecompiler/blob/main/fixtures/sample.c) supports manual Ghidra smoke tests.
 

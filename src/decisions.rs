@@ -76,7 +76,7 @@ pub struct DecisionCompletion {
     pub hash: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost: f64,
+    pub cost: Option<f64>,
     pub latency_ms: i64,
     pub prompt: Prompt,
 }
@@ -141,7 +141,7 @@ pub async fn analyze(ai: &Ai, db: &Db, job: &Job) -> Result<DecisionCompletion> 
     let request = json!({"model":decision.model,"state":{"version":VERSION,"context":context,"candidate":prompt.candidate},"questions":questions(&job.stage)});
     ensure!(
         serde_json::to_vec(&request)?.len() <= decision.max_input_bytes,
-        "Decision request exceeds reserved context budget"
+        "Decision request exceeds context limit"
     );
     let hash = hex::encode(Sha256::digest(serde_json::to_vec(&request)?));
     sqlx::query("UPDATE jobs SET transcript_json=? WHERE id=?")
@@ -151,17 +151,17 @@ pub async fn analyze(ai: &Ai, db: &Db, job: &Job) -> Result<DecisionCompletion> 
         .await?;
     let started = Instant::now();
     let key = std::env::var(&config.api_key_env).context("AI API key is not configured")?;
-    let response: Value = ai
+    let receipt = crate::billing::dispatch(db, &job.id).await?;
+    let response = ai
         .client
         .post(&decision.endpoint)
         .bearer_auth(key)
         .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
         .json(&request)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+    let response = crate::billing::response(response).await?;
+    let cost = crate::billing::record(db, Some(&receipt), &response).await?;
     let answers: BTreeMap<String, Choice> = serde_json::from_value(response["answers"].clone())
         .context("Invalid Decisions response")?;
     let expected = request["questions"].as_object().unwrap();
@@ -208,15 +208,6 @@ pub async fn analyze(ai: &Ai, db: &Db, job: &Job) -> Result<DecisionCompletion> 
         input_tokens <= i64::MAX as u64 && output_tokens <= i64::MAX as u64,
         "Invalid decision usage"
     );
-    let cost = response
-        .pointer("/usage/cost")
-        .and_then(Value::as_f64)
-        .unwrap_or(
-            (input_tokens as f64 * decision.input_usd_per_million
-                + output_tokens as f64 * decision.output_usd_per_million)
-                / 1_000_000.0,
-        );
-    ensure!(cost.is_finite() && cost >= 0.0, "Invalid decision cost");
     Ok(DecisionCompletion {
         model: response["model"].as_str().unwrap_or(&decision.model).into(),
         request,
@@ -233,17 +224,10 @@ pub async fn analyze(ai: &Ai, db: &Db, job: &Job) -> Result<DecisionCompletion> 
 
 pub async fn finish(db: &Db, job: &Job, mut c: DecisionCompletion) -> Result<()> {
     let mut tx = db.pool.begin().await?;
-    let changed = sqlx::query("UPDATE jobs SET status='completed',reserved_usd=0,error='',updated_at=unixepoch() WHERE id=? AND status='running'").bind(&job.id).execute(&mut *tx).await?.rows_affected();
+    let changed = sqlx::query("UPDATE jobs SET status='completed',error='',updated_at=unixepoch() WHERE id=? AND status='running'").bind(&job.id).execute(&mut *tx).await?.rows_affected();
     if changed == 0 {
         return Ok(());
     }
-    sqlx::query("UPDATE binaries SET reserved_usd=MAX(0,reserved_usd-?),spent_usd=spent_usd+?,paused=CASE WHEN spent_usd+?+reserved_usd-?>=budget_usd THEN 1 ELSE paused END WHERE id=?")
-        .bind(job.reserved_usd).bind(c.cost).bind(c.cost).bind(job.reserved_usd).bind(&job.binary_id).execute(&mut *tx).await?;
-    sqlx::query("UPDATE jobs SET accounted_usd=accounted_usd+? WHERE id=?")
-        .bind(c.cost)
-        .bind(&job.id)
-        .execute(&mut *tx)
-        .await?;
     let candidate_current = if let Some(candidate) = &c.prompt.candidate {
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM results r JOIN functions f ON f.id=r.function_id WHERE r.id=? AND r.revision=? AND r.stale=0 AND f.current_result_id=r.id AND r.name_review='pending' AND r.summary_review='pending')")
             .bind(candidate["result_id"].as_str().unwrap_or_default()).bind(candidate["revision"].as_i64().unwrap_or(-1)).fetch_one(&mut *tx).await?

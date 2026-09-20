@@ -209,6 +209,13 @@ pub async fn reanalyze(
     r: &proto::ReanalysisRequest,
 ) -> Result<proto::RunResponse> {
     ensure!(r.function_ids.len() <= 200, "Select at most 200 functions");
+    reanalyze_scope(db, config, r).await
+}
+pub(crate) async fn reanalyze_scope(
+    db: &Db,
+    config: &AiConfig,
+    r: &proto::ReanalysisRequest,
+) -> Result<proto::RunResponse> {
     let stage = if r.stage.is_empty() {
         "map"
     } else {
@@ -327,7 +334,6 @@ pub async fn investigations(db: &Db, binary: &str) -> Result<proto::Investigatio
             binary_id: r.get("binary_id"),
             question: r.get("question"),
             notes: r.get("notes"),
-            budget_usd: r.get("budget_usd"),
             revision: r.get::<i64, _>("revision") as u32,
             function_ids,
             result_ids,
@@ -341,29 +347,23 @@ pub async fn save_investigation(db: &Db, r: &proto::Investigation) -> Result<pro
         "Provide a question and keep notes below 32000 bytes"
     );
     ensure!(
-        r.budget_usd.is_finite()
-            && r.budget_usd > 0.0
-            && r.function_ids.len() <= 200
-            && r.result_ids.len() <= 200,
-        "Invalid budget or scope (maximum 200 functions and findings)"
+        r.function_ids.len() <= 200 && r.result_ids.len() <= 200,
+        "Invalid scope (maximum 200 functions and findings)"
     );
     let mut saved = r.clone();
     let mut tx = db.pool.begin().await?;
     if r.id.is_empty() {
         saved.id = id();
         saved.revision = 0;
-        sqlx::query(
-            "INSERT INTO investigations(id,binary_id,question,notes,budget_usd) VALUES(?,?,?,?,?)",
-        )
-        .bind(&saved.id)
-        .bind(&r.binary_id)
-        .bind(&r.question)
-        .bind(&r.notes)
-        .bind(r.budget_usd)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("INSERT INTO investigations(id,binary_id,question,notes) VALUES(?,?,?,?)")
+            .bind(&saved.id)
+            .bind(&r.binary_id)
+            .bind(&r.question)
+            .bind(&r.notes)
+            .execute(&mut *tx)
+            .await?;
     } else {
-        let changed=sqlx::query("UPDATE investigations SET question=?,notes=?,budget_usd=?,revision=revision+1 WHERE id=? AND binary_id=? AND revision=?").bind(&r.question).bind(&r.notes).bind(r.budget_usd).bind(&r.id).bind(&r.binary_id).bind(i64::from(r.revision)).execute(&mut *tx).await?.rows_affected();
+        let changed=sqlx::query("UPDATE investigations SET question=?,notes=?,revision=revision+1 WHERE id=? AND binary_id=? AND revision=?").bind(&r.question).bind(&r.notes).bind(&r.id).bind(&r.binary_id).bind(i64::from(r.revision)).execute(&mut *tx).await?.rows_affected();
         ensure!(changed == 1, "Investigation changed. Reload before saving.");
         saved.revision += 1;
     }

@@ -46,14 +46,16 @@ impl Db {
         Ok(())
     }
     pub async fn recover(&self) -> Result<()> {
-        // A lost HTTP response can still incur a charge. Retain its reservation.
+        // Preserve uncertainty after a lost response; retries can incur another charge.
         let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Reservation retained.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
+        sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Check the provider before retrying.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET status='interrupted',error='Extraction was interrupted. Resume to extract again.' WHERE status='extracting'").execute(&mut *tx).await?;
         sqlx::query("UPDATE type_operations SET status='uncertain',error='Process stopped during type writeback. Retry the exact operation.' WHERE status='applying'").execute(&mut *tx).await?;
         sqlx::query("UPDATE apply_operations SET status='uncertain',error='Process stopped during writeback. Retry this exact change set to reconcile.' WHERE status='applying'").execute(&mut *tx).await?;
         sqlx::query("UPDATE recovery_iterations SET status='blocked',error='Recovery process stopped before this iteration finished.' WHERE status IN ('analyzing','applying')").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET paused=1 WHERE id IN (SELECT binary_id FROM jobs WHERE status='uncertain')").execute(&mut *tx).await?;
+        sqlx::query("UPDATE recordings SET ghidra_status='Retry needed: Ghidra evidence save was interrupted' WHERE ghidra_status='saving'").execute(&mut *tx).await?;
+        sqlx::query("UPDATE recordings SET status='interrupted',error='Recorder stopped. Recover the saved journal before analysis.',finished_at=unixepoch() WHERE status IN ('starting','recording','stopping','importing')").execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -64,10 +66,10 @@ impl Db {
             tokio::task::spawn_blocking(move || crate::snapshot::create(&source, &root)).await??;
         let id = snapshot.id;
         let mut tx = self.pool.begin().await?;
-        let inserted = sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING")
+        let inserted = sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES(?,?,?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING")
             .bind(&id).bind(path.file_name().unwrap_or_default().to_string_lossy().as_ref()).bind(&snapshot.sha256)
             .bind(snapshot.size).bind(&snapshot.architecture).bind(&snapshot.format)
-            .bind(snapshot.path.to_string_lossy().as_ref()).bind(config.ai.budget_usd).execute(&mut *tx).await?.rows_affected() == 1;
+            .bind(snapshot.path.to_string_lossy().as_ref()).execute(&mut *tx).await?.rows_affected() == 1;
         let row = sqlx::query("SELECT * FROM binaries WHERE sha256=?")
             .bind(&snapshot.sha256)
             .fetch_one(&mut *tx)
@@ -176,11 +178,10 @@ impl Db {
     }
     pub async fn overview(&self, id: &str) -> Result<proto::Overview> {
         let binary = self.binary(id).await?;
-        let b =
-            sqlx::query("SELECT spent_usd,reserved_usd,budget_usd,paused,active_run_id FROM binaries WHERE id=?")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await?;
+        let b = sqlx::query("SELECT paused,active_run_id FROM binaries WHERE id=?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
         let f = sqlx::query("SELECT COUNT(*) AS total,COUNT(CASE WHEN skip_reason='' THEN 1 END) AS eligible,COUNT(DISTINCT NULLIF(module,'')) AS modules FROM functions WHERE binary_id=?").bind(id).fetch_one(&self.pool).await?;
         let totals = sqlx::query("SELECT COUNT(DISTINCT r.function_id) AS analyzed,COALESCE(SUM(input_tokens),0) AS input_tokens,COALESCE(SUM(output_tokens),0) AS output_tokens FROM results r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=?").bind(id).fetch_one(&self.pool).await?;
         let edges: i64 = sqlx::query_scalar(
@@ -206,9 +207,8 @@ impl Db {
             output_tokens: totals.get::<i64, _>("output_tokens") as u64,
             edges: edges as u32,
             proposals: proposals as u32,
-            cost_usd: b.get("spent_usd"),
-            reserved_usd: b.get("reserved_usd"),
-            budget_usd: b.get("budget_usd"),
+            cost_usd: sqlx::query_scalar("SELECT SUM(p.cost_usd) FROM provider_requests p JOIN jobs j ON j.id=p.job_id WHERE j.binary_id=?").bind(id).fetch_one(&self.pool).await?,
+            unreported_cost_requests: sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM provider_requests p JOIN jobs j ON j.id=p.job_id WHERE j.binary_id=? AND p.cost_usd IS NULL").bind(id).fetch_one(&self.pool).await? as u32,
             paused: b.get("paused"),
             active_run_id: b
                 .get::<Option<String>, _>("active_run_id")
@@ -241,13 +241,13 @@ impl Db {
             overview.failed += s.failed;
             overview.stages.push(s);
         }
-        overview.usage = sqlx::query("SELECT strftime('%Y-%m-%d %H:00',r.created_at,'unixepoch') AS bucket,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,SUM(cost_usd) AS cost_usd,COUNT(*) AS requests FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY bucket ORDER BY bucket DESC LIMIT 48")
-            .bind(id).fetch_all(&self.pool).await?.iter().map(|r| proto::UsagePoint { bucket: r.get("bucket"), input_tokens: r.get::<i64,_>("input_tokens") as u64, output_tokens: r.get::<i64,_>("output_tokens") as u64, cost_usd: r.get("cost_usd"), requests: r.get::<i64,_>("requests") as u32 }).collect();
-        let decision_tokens: (i64, i64) = sqlx::query_as("SELECT COALESCE(SUM(d.input_tokens),0),COALESCE(SUM(d.output_tokens),0) FROM decisions d JOIN functions f ON f.id=d.function_id WHERE f.binary_id=?").bind(id).fetch_one(&self.pool).await?;
-        overview.input_tokens += decision_tokens.0 as u64;
-        overview.output_tokens += decision_tokens.1 as u64;
+        overview.usage = sqlx::query("SELECT strftime('%Y-%m-%d %H:00',r.created_at,'unixepoch') AS bucket,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,SUM(cost_usd) AS cost_usd,COUNT(*)-COUNT(cost_usd) AS unreported,COUNT(*) AS requests FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY bucket ORDER BY bucket DESC LIMIT 48")
+            .bind(id).fetch_all(&self.pool).await?.iter().map(|r| proto::UsagePoint { bucket: r.get("bucket"), unreported_cost_requests: r.get::<i64,_>("unreported") as u32, input_tokens: r.get::<i64,_>("input_tokens") as u64, output_tokens: r.get::<i64,_>("output_tokens") as u64, cost_usd: r.get("cost_usd"), requests: r.get::<i64,_>("requests") as u32 }).collect();
+        let tokens: (i64, i64) = sqlx::query_as("SELECT COALESCE(SUM(p.input_tokens),0),COALESCE(SUM(p.output_tokens),0) FROM provider_usage p JOIN functions f ON f.id=p.function_id WHERE f.binary_id=?").bind(id).fetch_one(&self.pool).await?;
+        overview.input_tokens = tokens.0 as u64;
+        overview.output_tokens = tokens.1 as u64;
         overview.usage.reverse();
-        overview.provider_breakdowns = sqlx::query("SELECT r.model,r.stage,COUNT(*) requests,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens,SUM(cost_usd) cost_usd,AVG(latency_ms) average_latency_ms FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY r.model,r.stage ORDER BY cost_usd DESC,r.model,r.stage")
+        overview.provider_breakdowns = sqlx::query("SELECT r.model,r.stage,COUNT(*)-COUNT(cost_usd) unreported,COUNT(*) requests,SUM(input_tokens) input_tokens,SUM(output_tokens) output_tokens,SUM(cost_usd) cost_usd,AVG(latency_ms) average_latency_ms FROM provider_usage r JOIN functions f ON f.id=r.function_id WHERE f.binary_id=? GROUP BY r.model,r.stage ORDER BY cost_usd DESC,r.model,r.stage")
             .bind(id)
             .fetch_all(&self.pool)
             .await?
@@ -259,6 +259,7 @@ impl Db {
                 input_tokens: r.get::<i64, _>("input_tokens") as u64,
                 output_tokens: r.get::<i64, _>("output_tokens") as u64,
                 cost_usd: r.get("cost_usd"),
+                unreported_cost_requests: r.get::<i64,_>("unreported") as u32,
                 average_latency_ms: r.get("average_latency_ms"),
             })
             .collect();

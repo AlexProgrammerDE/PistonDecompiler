@@ -40,6 +40,6 @@ Keep this list empty for normal use through the Rust server.
 
 ## Cost boundaries
 
-Budget checks rely on configured prices and provider usage reports.
-Unknown outcomes retain conservative charges to reduce accidental repeat spending.
-Provider billing can differ from local estimates.
+Configure spending limits with your provider. The scheduler does not enforce a local dollar limit.
+Reported costs come only from provider receipts. Missing receipts leave costs unknown.
+An HTTP 402 response pauses the affected binary. Retrying uncertain requests can incur additional charges.

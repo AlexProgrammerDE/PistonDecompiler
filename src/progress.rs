@@ -12,6 +12,9 @@ pub fn estimate(completed: i64, total: i64, elapsed: i64) -> i64 {
 
 pub async fn reports(db: &Db, binary: &str) -> Result<Vec<ProgressReport>> {
     let mut reports = Vec::new();
+    if let Some(r) = sqlx::query("SELECT status,scenario,created_at,COALESCE(finished_at,unixepoch())-created_at elapsed,unixepoch() now FROM recordings WHERE binary_id=? ORDER BY rowid DESC LIMIT 1").bind(binary).fetch_optional(&db.pool).await? {
+        reports.push(ProgressReport {phase:"Runtime recording".into(),status:r.get("status"),completed:0,total:0,elapsed_seconds:r.get("elapsed"),eta_seconds:-1,detail:format!("Scenario: {}. Open Recordings for observations, markers, and the capture time limit.",r.get::<String,_>("scenario")),updated_at:r.get("now")});
+    }
     if let Some(r) = sqlx::query("SELECT p.*,b.status,unixepoch()-p.started_at elapsed,unixepoch()-p.phase_started_at phase_elapsed FROM extraction_progress p JOIN binaries b ON b.id=p.binary_id WHERE binary_id=?")
         .bind(binary).fetch_optional(&db.pool).await? {
         let active = r.get::<String,_>("status") == "extracting";

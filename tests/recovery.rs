@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 async fn recovery_analyzes_callees_before_callers_and_pins_each_component() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','fixture','sha',10,'x86_64','ELF','unused',10)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES('b','fixture','sha',10,'x86_64','ELF','unused')").execute(&db.pool).await.unwrap();
     let path = dir.path().join("export.jsonl");
     std::fs::write(&path,[json!({"address":"1000","name":"root","size":16,"pseudocode":"return child();","callees":["1010"]}),json!({"address":"1010","name":"child","size":16,"pseudocode":"return 1;"})].map(|v|v.to_string()).join("\n")).unwrap();
     ghidra::import_export(&db, "b", &path).await.unwrap();
@@ -33,8 +33,6 @@ async fn recovery_analyzes_callees_before_callers_and_pins_each_component() {
         model: "fixture".into(),
         base_url: format!("http://{address}"),
         api_key_env: "USER".into(),
-        input_usd_per_million: 1.0,
-        output_usd_per_million: 1.0,
         ..Default::default()
     })
     .unwrap();
@@ -176,8 +174,6 @@ async fn real_ghidra_recovery_applies_types_then_converges_with_fresh_evidence()
         base_url: endpoint.clone(),
         model: "fixture".into(),
         api_key_env: "USER".into(),
-        input_usd_per_million: 1.0,
-        output_usd_per_million: 1.0,
         decisions: Some(DecisionConfig {
             endpoint: format!("{endpoint}/decisions"),
             ..Default::default()

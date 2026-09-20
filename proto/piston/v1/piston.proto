@@ -22,6 +22,9 @@ service PistonService {
   rpc PreviewApply(BinaryRequest) returns (ApplyOperation);
   rpc ListApplyOperations(BinaryRequest) returns (ApplyOperationList);
   rpc ExecuteApply(ApplyRequest) returns (ApplyOperation);
+  rpc StartRecording(StartRecordingRequest) returns (Recording);
+  rpc ListRecordings(BinaryRequest) returns (RecordingList);
+  rpc ControlRecording(RecordingControl) returns (Recording);
   rpc GetSettings(Empty) returns (Settings);
 }
 message Empty {}
@@ -36,17 +39,17 @@ message ImportRequest { string path = 1; string name = 2; bytes content = 3; }
 message Overview {
   Binary binary = 1; uint32 functions = 2; uint32 eligible = 3; uint32 analyzed = 4;
   uint32 queued = 5; uint32 running = 6; uint32 failed = 7; uint32 proposals = 8;
-  uint64 input_tokens = 9; uint64 output_tokens = 10; double cost_usd = 11;
-  double reserved_usd = 12; double budget_usd = 13; uint32 edges = 14; uint32 modules = 15;
+  uint64 input_tokens = 9; uint64 output_tokens = 10; optional double cost_usd = 11;
+  reserved 12, 13; uint32 edges = 14; uint32 modules = 15;
   repeated UsagePoint usage = 16; repeated Stage stages = 17; bool paused = 18;
-  repeated ProviderBreakdown provider_breakdowns = 19; string active_run_id = 20; repeated ProgressReport progress = 21; string ghidra_desktop = 22;
+  repeated ProviderBreakdown provider_breakdowns = 19; string active_run_id = 20; repeated ProgressReport progress = 21; string ghidra_desktop = 22; uint32 unreported_cost_requests = 23;
 }
-message UsagePoint { string bucket = 1; uint64 input_tokens = 2; uint64 output_tokens = 3; double cost_usd = 4; uint32 requests = 5; }
+message UsagePoint { string bucket = 1; uint64 input_tokens = 2; uint64 output_tokens = 3; optional double cost_usd = 4; uint32 requests = 5; uint32 unreported_cost_requests = 6; }
 message Stage { string name = 1; uint32 queued = 2; uint32 completed = 3; uint32 failed = 4; uint32 running = 5; }
 message ProviderBreakdown {
   string model = 1; string stage = 2; uint32 requests = 3;
-  uint64 input_tokens = 4; uint64 output_tokens = 5; double cost_usd = 6;
-  double average_latency_ms = 7;
+  uint64 input_tokens = 4; uint64 output_tokens = 5; optional double cost_usd = 6;
+  optional double average_latency_ms = 7; uint32 unreported_cost_requests = 8;
 }
 message FunctionQuery { string binary_id = 1; string search = 2; uint32 offset = 3; uint32 limit = 4; string filter = 5; }
 message Function {
@@ -63,7 +66,7 @@ message FunctionDetail {
   string analysis_json = 7; string model = 8; string prompt_hash = 9;
   string disassembly = 10; string pcode = 11; AnalysisResult result = 12; repeated DecisionRecord decisions = 13;
 }
-message Job { string id = 1; string function_id = 2; string name = 3; string stage = 4; string status = 5; uint32 attempts = 6; string error = 7; int64 updated_at = 8; double reserved_usd = 9; int64 started_at = 10; int64 finished_at = 11; }
+message Job { string id = 1; string function_id = 2; string name = 3; string stage = 4; string status = 5; uint32 attempts = 6; string error = 7; int64 updated_at = 8; reserved 9; int64 started_at = 10; int64 finished_at = 11; }
 message JobList { repeated Job jobs = 1; }
 message Event { int64 id = 1; int64 created_at = 2; string level = 3; string message = 4; }
 message EventList { repeated Event events = 1; }
@@ -71,7 +74,7 @@ message ControlRequest { string binary_id = 1; string action = 2; }
 message ReviewRequest { reserved 1, 2; string result_id = 3; uint32 expected_revision = 4; string field = 5; string decision = 6; string reason = 7; }
 message Settings {
   bool ai_configured = 1; bool ghidra_configured = 2; string model = 3;
-  string escalation_model = 4; uint32 concurrency = 5; double budget_usd = 6;
+  string escalation_model = 4; uint32 concurrency = 5; reserved 6;
   uint32 max_input_bytes = 7; string provider_url = 8; bool batch_enabled = 9;
   string decision_model = 10; string decision_endpoint = 11; double decision_threshold = 12;
 }
@@ -89,7 +92,7 @@ message Artifact { string id = 1; string extraction_id = 2; string function_id =
 message CorrectionRequest { string result_id = 1; uint32 expected_revision = 2; string proposed_name = 3; string summary = 4; string reason = 5; }
 message ReanalysisRequest { string binary_id = 1; repeated string function_ids = 2; bool stale_only = 3; string investigation_id = 4; string stage = 5; }
 message RunResponse { string id = 1; uint32 queued = 2; }
-message Investigation { string id = 1; string binary_id = 2; string question = 3; string notes = 4; double budget_usd = 5; uint32 revision = 6; repeated string function_ids = 7; repeated string result_ids = 8; }
+message Investigation { string id = 1; string binary_id = 2; string question = 3; string notes = 4; reserved 5; uint32 revision = 6; repeated string function_ids = 7; repeated string result_ids = 8; }
 message InvestigationList { repeated Investigation investigations = 1; }
 message ApplyRequest { string id = 1; }
 message ApplyItem { string result_id = 1; uint32 revision = 2; string address = 3; string expected_name = 4; string expected_comment = 5; string name = 6; string summary = 7; string status = 8; string error = 9; }
@@ -104,7 +107,7 @@ message DecisionRecord {
  string id = 1; string stage = 2; string model = 3; string route = 4;
  string request_json = 5; string response_json = 6; string extraction_id = 7;
  string prompt_hash = 8; uint64 input_tokens = 9; uint64 output_tokens = 10;
- double cost_usd = 11; int64 created_at = 12;
+ optional double cost_usd = 11; int64 created_at = 12;
 }
 
 message ProgressReport {
@@ -112,3 +115,18 @@ message ProgressReport {
  int64 elapsed_seconds = 5; int64 eta_seconds = 6; string detail = 7;
  int64 updated_at = 8;
 }
+
+message StartRecordingRequest {
+ string binary_id = 1; string scenario = 2; string executable = 3;
+ uint32 pid = 4; string mode = 5; repeated string function_ids = 6;
+ uint32 seconds = 7; repeated string arguments = 8; string working_directory = 9;
+ uint32 argument_count = 10; uint32 snapshot_bytes = 11; bool trace_memory = 12;
+}
+message RecordingControl { string id = 1; string action = 2; string label = 3; }
+message Recording {
+ string id = 1; string binary_id = 2; string scenario = 3; string mode = 4;
+ string status = 5; string error = 6; int64 created_at = 7; int64 finished_at = 8;
+ string progress_json = 9; string coverage_json = 10; string analysis_run_id = 11;
+ string ghidra_status = 12;
+}
+message RecordingList { repeated Recording recordings = 1; }

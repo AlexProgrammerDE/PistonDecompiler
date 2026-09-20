@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TypeRef {
     Function {
@@ -10,6 +10,7 @@ pub enum TypeRef {
         parameters: Vec<TypeRef>,
     },
     Primitive {
+        #[schemars(regex(pattern = "^(void|bool|i8|u8|i16|u16|i32|u32|i64|u64|f32|f64)$"))]
         name: String,
     },
     Named {
@@ -20,26 +21,29 @@ pub enum TypeRef {
     },
     Array {
         element: Box<TypeRef>,
+        #[schemars(range(min = 1))]
         count: u32,
     },
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Field {
     pub name: String,
     pub offset: u32,
     pub data_type: TypeRef,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Definition {
     Structure {
         name: String,
+        #[schemars(range(min = 1))]
         size: u32,
         fields: Vec<Field>,
     },
     Enumeration {
         name: String,
+        #[schemars(range(min = 1))]
         size: u32,
         values: BTreeMap<String, i64>,
     },
@@ -56,13 +60,13 @@ impl Definition {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Parameter {
     pub name: String,
     pub data_type: TypeRef,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Signature {
     pub address: String,
@@ -77,7 +81,7 @@ pub struct Signature {
     #[serde(default)]
     pub variadic: bool,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TypePlan {
     #[serde(default)]

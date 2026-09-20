@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 async fn fixture(batch_size: usize) -> (tempfile::TempDir, Db, Ai, Config) {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("test.db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd,paused) VALUES('b','fixture','sha',10,'x86','ELF','unused',10.0,1)")
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,paused) VALUES('b','fixture','sha',10,'x86','ELF','unused',1)")
         .execute(&db.pool)
         .await
         .unwrap();
@@ -39,8 +39,6 @@ async fn fixture(batch_size: usize) -> (tempfile::TempDir, Db, Ai, Config) {
     let ai_config = AiConfig {
         api_key_env: "PATH".into(),
         model: "fixture".into(),
-        input_usd_per_million: 1.0,
-        output_usd_per_million: 2.0,
         batch_enabled: true,
         batch_size,
         ..Default::default()
@@ -55,7 +53,7 @@ async fn fixture(batch_size: usize) -> (tempfile::TempDir, Db, Ai, Config) {
 }
 
 #[tokio::test]
-async fn batch_submit_and_partial_collection_conserve_jobs_and_reservations() {
+async fn batch_submit_and_partial_collection_preserve_jobs_and_unknown_costs() {
     let (_dir, db, mut ai, mut config) = fixture(2).await;
     let output = Arc::new(RwLock::new(String::new()));
     let app = Router::new()
@@ -140,8 +138,8 @@ async fn batch_submit_and_partial_collection_conserve_jobs_and_reservations() {
     assert_eq!(counts.get::<i64, _>("completed"), 1);
     assert_eq!(counts.get::<i64, _>("queued"), 1);
     let overview = db.overview("b").await.unwrap();
-    assert_eq!(overview.reserved_usd, 0.0);
-    assert!(overview.cost_usd > 0.0);
+    assert_eq!(overview.cost_usd, None);
+    assert_eq!(overview.unreported_cost_requests, 2);
     server.abort();
 }
 
@@ -170,18 +168,15 @@ async fn abandoning_local_and_uncertain_batches_requires_the_right_evidence() {
             .unwrap();
         if status == "submitting" {
             assert!(batch::abandon(&db, "batch", false).await.is_err());
-            assert!(db.overview("b").await.unwrap().reserved_usd > 0.0);
         }
         batch::abandon(&db, "batch", confirmed).await.unwrap();
-        let row = sqlx::query("SELECT status,attempts,reserved_usd,batch_id FROM jobs WHERE id=?")
+        let row = sqlx::query("SELECT status,attempts,batch_id FROM jobs WHERE id=?")
             .bind(&job.id)
             .fetch_one(&db.pool)
             .await
             .unwrap();
         assert_eq!(row.get::<String, _>("status"), "queued");
         assert_eq!(row.get::<i64, _>("attempts"), 0);
-        assert_eq!(row.get::<f64, _>("reserved_usd"), 0.0);
         assert!(row.get::<Option<String>, _>("batch_id").is_none());
-        assert_eq!(db.overview("b").await.unwrap().reserved_usd, 0.0);
     }
 }

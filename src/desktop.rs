@@ -76,7 +76,13 @@ pub async fn dispatch(
         .get(script + 1)
         .context("Missing desktop script name")?;
     ensure!(
-        ["PistonExport.java", "PistonTypes.java", "PistonApply.java"].contains(&name.as_str()),
+        [
+            "PistonExport.java",
+            "PistonTypes.java",
+            "PistonApply.java",
+            "PistonRuntime.java"
+        ]
+        .contains(&name.as_str()),
         "Unsupported desktop script"
     );
     request(config, binary, &state, name, &args[script + 2..], cancel).await?;
@@ -231,6 +237,7 @@ pub async fn open(config: &Config, binary: &str) -> Result<()> {
             scripts.join("PistonExport.java"),
             scripts.join("PistonApply.java"),
             scripts.join("PistonTypes.java"),
+            scripts.join("PistonRuntime.java"),
         ])
         .output()
         .await

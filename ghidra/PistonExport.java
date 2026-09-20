@@ -61,6 +61,10 @@ public class PistonExport extends GhidraScript {
                 row.put("size", function.getBody().getNumAddresses());
                 row.put("thunk", function.isThunk());
                 row.put("external", function.isExternal());
+                Function thunkTarget = function.getThunkedFunction(true);
+                row.put("external_thunk", thunkTarget != null && thunkTarget.isExternal());
+                var memoryBlock = currentProgram.getMemory().getBlock(function.getEntryPoint());
+                row.put("executable", memoryBlock != null && memoryBlock.isExecute());
                 var result = decompiler.decompileFunction(function, 60, monitor);
                 row.put("pseudocode", result.decompileCompleted() ? result.getDecompiledFunction().getC() : "");
                 Set<String> callees = new TreeSet<>();

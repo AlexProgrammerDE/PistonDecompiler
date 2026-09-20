@@ -159,7 +159,7 @@ async fn event_stream_replays_only_events_after_cursor() {
     use tokio_util::sync::CancellationToken;
     let directory = tempfile::tempdir().unwrap();
     let db = Db::open(&directory.path().join("events.db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','test','hash',1,'x86','ELF','unused',1)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES('b','test','hash',1,'x86','ELF','unused')").execute(&db.pool).await.unwrap();
     db.event("b", "info", "First operation").await.unwrap();
     let cursor: i64 = sqlx::query_scalar("SELECT MAX(id) FROM events")
         .fetch_one(&db.pool)

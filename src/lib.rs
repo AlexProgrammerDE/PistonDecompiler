@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod batch;
+pub mod billing;
 pub mod config;
 pub mod db;
 pub mod decisions;
@@ -24,3 +25,5 @@ pub mod recovery;
 pub mod progress;
 
 pub mod desktop;
+
+pub mod recording;

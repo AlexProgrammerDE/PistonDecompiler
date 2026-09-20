@@ -12,8 +12,6 @@ use std::{collections::HashMap, path::PathBuf};
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
-    input_rate: f64,
-    output_rate: f64,
     model: String,
     hashes: HashMap<String, String>,
 }
@@ -37,10 +35,7 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
     sqlx::query("INSERT INTO batches(id,binary_id,status,path,model,provider_url) VALUES(?,?,'preparing',?,?,?)")
         .bind(&id).bind(binary).bind(path.to_string_lossy().as_ref()).bind(&ai.config.model).bind(&ai.config.base_url).execute(&db.pool).await?;
     let mut lines = String::new();
-    let (ir, or) = ai.config.rates("map");
     let mut manifest = Manifest {
-        input_rate: ir * ai.config.batch_price_multiplier,
-        output_rate: or * ai.config.batch_price_multiplier,
         model: ai.config.model.clone(),
         hashes: HashMap::new(),
     };
@@ -75,7 +70,7 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
             .bind(&id)
             .execute(&db.pool)
             .await?;
-        anyhow::bail!("no eligible map jobs fit the remaining budget");
+        anyhow::bail!("no eligible map jobs");
     }
     tokio::fs::write(&path, lines.as_bytes()).await?;
     tokio::fs::write(
@@ -100,6 +95,8 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
             .bind(&id)
             .execute(&db.pool)
             .await?;
+        sqlx::query("INSERT OR IGNORE INTO provider_requests(id,job_id,dispatch_id) SELECT 'batch:'||?||':'||id,id,dispatch_id FROM jobs WHERE batch_id=? AND status='batched'")
+            .bind(&id).bind(&id).execute(&db.pool).await?;
         let response = ai.client.post(ai.endpoint("batches")).bearer_auth(ai.key()?).json(&json!({"input_file_id":file_id,"endpoint":"/v1/chat/completions","completion_window":"24h","metadata":{"piston_batch_id":id}})).send().await?;
         ensure!(response.status().is_success(), "batch submission returned HTTP {}",response.status());
         let value: Value = response.json().await?;
@@ -156,19 +153,8 @@ pub async fn abandon(db: &Db, id: &str, confirmed_not_submitted: bool) -> Result
         matches!(status.as_str(), "preparing" | "uploading") || confirmed_not_submitted,
         "inspect the provider first, then pass --confirmed-not-submitted for an uncertain submission"
     );
-    let reserved: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(reserved_usd),0.0) FROM jobs WHERE batch_id=? AND status IN ('running','batched','uncertain')",
-    )
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query("UPDATE jobs SET status='queued',attempts=MAX(0,attempts-1),reserved_usd=0,batch_id=NULL,available_at=0,error='',updated_at=unixepoch() WHERE batch_id=? AND status IN ('running','batched','uncertain')")
+    sqlx::query("UPDATE jobs SET status='queued',attempts=MAX(0,attempts-1),batch_id=NULL,available_at=0,error='',updated_at=unixepoch() WHERE batch_id=? AND status IN ('running','batched','uncertain')")
         .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("UPDATE binaries SET reserved_usd=MAX(0,reserved_usd-?) WHERE id=?")
-        .bind(reserved)
-        .bind(&binary)
         .execute(&mut *tx)
         .await?;
     sqlx::query("UPDATE batches SET status='abandoned' WHERE id=?")
@@ -252,8 +238,13 @@ pub async fn collect(db: &Db, ai: &Ai, id: &str) -> Result<String> {
             }
         }
     }
-    let jobs = sqlx::query_as::<_,Job>("SELECT id,binary_id,function_id,stage,attempts,reserved_usd FROM jobs WHERE batch_id=? AND status='batched'").bind(id).fetch_all(&db.pool).await?;
+    let jobs = sqlx::query_as::<_,Job>("SELECT id,binary_id,function_id,stage,attempts FROM jobs WHERE batch_id=? AND status='batched'").bind(id).fetch_all(&db.pool).await?;
     for job in jobs {
+        if let Some(item) = results.get(&job.id) {
+            let receipt = format!("batch:{id}:{}", job.id);
+            sqlx::query("INSERT OR IGNORE INTO provider_requests(id,job_id,dispatch_id) SELECT ?,id,dispatch_id FROM jobs WHERE id=?").bind(&receipt).bind(&job.id).execute(&db.pool).await?;
+            crate::billing::record(db, Some(&receipt), &item["response"]["body"]).await?;
+        }
         let pinned_input: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
             .bind(&job.id)
             .fetch_one(&db.pool)
@@ -283,8 +274,7 @@ pub async fn collect(db: &Db, ai: &Ai, id: &str) -> Result<String> {
                 analysis,
                 input_tokens: input,
                 output_tokens: output,
-                cost: (input as f64 * manifest.input_rate + output as f64 * manifest.output_rate)
-                    / 1_000_000.0,
+                cost: crate::billing::reported_cost(body),
                 latency_ms: 0,
                 prompt_hash: manifest
                     .hashes

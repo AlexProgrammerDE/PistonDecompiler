@@ -4,7 +4,7 @@ use piston_decompiler::{db::Db, ghidra, progress};
 async fn reports_scope_runs_and_suppress_paused_estimates() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','fixture','sha',10,'x86_64','ELF','unused',1)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES('b','fixture','sha',10,'x86_64','ELF','unused')").execute(&db.pool).await.unwrap();
     let export = dir.path().join("export.jsonl");
     std::fs::write(
         &export,

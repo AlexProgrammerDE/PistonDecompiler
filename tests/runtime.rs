@@ -52,7 +52,7 @@ fn allocation_lifetimes_and_bounds_are_enforced() {
 async fn import_is_atomic_idempotent_and_reaches_model_evidence() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','fixture','sha',10,'x86_64','ELF','unused',1)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path) VALUES('b','fixture','sha',10,'x86_64','ELF','unused')").execute(&db.pool).await.unwrap();
     let export = dir.path().join("export.jsonl");
     std::fs::write(
         &export,

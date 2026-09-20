@@ -18,7 +18,6 @@ export function InvestigationWorkbench({
   onSelect: (id: string) => void
 }) {
   const [question, setQuestion] = useState("")
-  const [budget, setBudget] = useState("1")
   const query = useQuery({
     queryKey: ["binary", binaryId, "investigations"],
     queryFn: ({ signal }) => api.listInvestigations({ binaryId }, { signal }),
@@ -36,7 +35,6 @@ export function InvestigationWorkbench({
       return api.saveInvestigation({
         binaryId,
         question,
-        budgetUsd: Number(budget),
         functionIds,
       })
     },
@@ -68,20 +66,6 @@ export function InvestigationWorkbench({
               id="investigation-question"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              required
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="investigation-budget">
-              Investigation budget (USD)
-            </FieldLabel>
-            <Input
-              id="investigation-budget"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
               required
             />
           </Field>
@@ -147,10 +131,7 @@ function InvestigationEditor({
   return (
     <article className="settings-section flex flex-col gap-3">
       <h3>{item.question}</h3>
-      <p>
-        {item.functionIds.length} functions · ${item.budgetUsd.toFixed(2)}{" "}
-        budget
-      </p>
+      <p>{item.functionIds.length} functions</p>
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"

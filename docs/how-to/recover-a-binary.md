@@ -6,7 +6,7 @@ The `recover` command runs the integrated loop. The existing `run` command only 
 ## Prepare the binary
 
 1. Set `ghidra_home` to an installed Ghidra directory in the configuration file.
-2. Configure the reasoning model, Jev, request prices, and a binary budget.
+2. Configure the reasoning model, Jev, and your provider’s spending limit.
 3. Import and extract the binary:
 
 ```sh
@@ -14,6 +14,15 @@ pistondecompiler import /path/to/program --extract
 ```
 
 Use the returned binary ID in subsequent commands.
+For providers that support JSON Schema responses, set `ai.structured_outputs = true`.
+The response schema requires linked claims and constrains supported type representations.
+Local validation still checks citations, layouts, and names.
+
+OpenRouter models can also use `ai.reasoning_effort` with a supported effort level.
+Omit it to retain the model default.
+Reasoning tokens can consume the output allowance before the model returns analysis JSON.
+If that happens, adjust the effort or `ai.max_output_tokens` within your budget.
+
 For an existing project with older export metadata, refresh it before creating a capture plan:
 
 ```sh
@@ -21,6 +30,8 @@ pistondecompiler refresh BINARY_ID
 ```
 
 ## Collect runtime evidence
+
+For interactive recording, use the [Recordings view](record-a-session.md). The steps below describe the standalone adapter.
 
 1. Create a capture plan:
 
@@ -55,9 +66,9 @@ Both options use Stalker and can increase capture overhead.
 Function-entry coverage and selected argument samples work without Stalker.
 
 The initial adapter supports the main module and `malloc`/`free` lifetimes.
-It does not treat arbitrary pointer arguments as allocations.
-Untracked allocators, `realloc`, interior pointers, and other modules require additional collector adapters.
-Instruction-level memory events can enter through the trace contract, but this collector emits snapshots rather than instruction-level accesses.
+Readable untracked pointers use region observations with unknown allocation lifetimes. Interior pointers retain known allocation identity.
+The managed recorder also supports allocator profiles and bounded x86-64 MOV memory tracing.
+Other modules and allocator contracts need additional adapters.
 
 ## Import observations
 
@@ -110,7 +121,7 @@ Inspect progress and stop reasons:
 pistondecompiler recovery-status BINARY_ID
 ```
 
-A new invocation creates new analysis runs and consumes their configured budget.
+A new invocation creates new analysis runs and can incur new provider charges.
 It does not silently resume an unfinished model request or reset its accounting.
 
 ## Apply a reviewed type proposal manually
@@ -122,6 +133,14 @@ pistondecompiler apply-types OPERATION_ID
 
 Application refreshes decompilation from the existing Ghidra project.
 The operation preserves historical results, reviews, and cost accounting.
+
+To combine compatible proposals in one preview, pass multiple result IDs:
+
+```sh
+pistondecompiler preview-types RESULT_ID_1 RESULT_ID_2
+```
+
+Conflicting definitions or signatures stop the preview before Ghidra changes.
 
 If application stops with an uncertain outcome, inspect the Ghidra log and retry the same operation ID.
 The Ghidra transaction stores the operation identity for idempotent reconciliation.

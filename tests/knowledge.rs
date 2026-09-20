@@ -9,14 +9,12 @@ use serde_json::json;
 async fn fixture() -> (tempfile::TempDir, Db, Ai) {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(&dir.path().join("state.db")).await.unwrap();
-    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd,paused) VALUES('b','test','hash',1,'x86','ELF','unused',10,0)").execute(&db.pool).await.unwrap();
+    sqlx::query("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,paused) VALUES('b','test','hash',1,'x86','ELF','unused',0)").execute(&db.pool).await.unwrap();
     let path = dir.path().join("export.jsonl");
     std::fs::write(&path,[json!({"address":"1000","name":"leaf","size":30,"pseudocode":"int leaf(int n) {\n return n + 1;\n}"}),json!({"address":"2000","name":"caller","size":30,"pseudocode":"int caller(int n) {\n return leaf(n);\n}","callees":["1000"]})].iter().map(|v|v.to_string()).collect::<Vec<_>>().join("\n")).unwrap();
     ghidra::import_export(&db, "b", &path).await.unwrap();
     let ai = Ai::new(AiConfig {
         model: "fixture".into(),
-        input_usd_per_million: 1.0,
-        output_usd_per_million: 2.0,
         ..Default::default()
     })
     .unwrap();
@@ -37,7 +35,7 @@ fn completion() -> Completion {
         },
         input_tokens: 10,
         output_tokens: 10,
-        cost: 0.001,
+        cost: Some(0.001),
         latency_ms: 1,
         prompt_hash: "fixture".into(),
         model: "fixture".into(),
@@ -188,7 +186,7 @@ async fn evidence_references_must_point_inside_supplied_artifacts() {
     assert!(evidence.content.contains("return n + 1"));
 }
 #[tokio::test]
-async fn investigation_scope_budget_and_revision_are_enforced() {
+async fn investigation_scope_and_revision_are_enforced() {
     let (_dir, db, ai) = fixture().await;
     finish_next(&db, &ai).await;
     finish_next(&db, &ai).await;
@@ -197,7 +195,6 @@ async fn investigation_scope_budget_and_revision_are_enforced() {
         &proto::Investigation {
             binary_id: "b".into(),
             question: "Where is arithmetic performed?".into(),
-            budget_usd: 0.000001,
             function_ids: vec!["b:1000".into()],
             ..Default::default()
         },
@@ -372,6 +369,9 @@ async fn original_database_migrates_without_losing_results() {
     sqlx::raw_sql("INSERT INTO binaries(id,name,sha256,size,architecture,format,path,budget_usd) VALUES('b','old','hash',1,'x86','ELF','unused',1); INSERT INTO functions(id,binary_id,address,name,size,pseudocode) VALUES('f','b','1000','original',1,'return 1;'); INSERT INTO jobs(id,binary_id,function_id,stage,status) VALUES('j','b','f','map','completed'); INSERT INTO results(id,job_id,function_id,stage,model,prompt_hash,raw_json,proposed_name,summary,confidence,review,input_tokens,output_tokens,cost_usd,latency_ms) VALUES('r','j','f','map','old','hash','{}','one','Returns one.',0.7,'applied',10,10,0.1,1);").execute(&pool).await.unwrap();
     pool.close().await;
     let db = Db::open(&path).await.unwrap();
+    let overview = db.overview("b").await.unwrap();
+    assert_eq!(overview.cost_usd, None);
+    assert_eq!(overview.unreported_cost_requests, 1);
     let detail = db.function("f").await.unwrap();
     assert_eq!(detail.result.unwrap().id, "r");
     assert_eq!(

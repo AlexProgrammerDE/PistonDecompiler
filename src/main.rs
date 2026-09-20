@@ -40,10 +40,10 @@ enum Command {
         #[arg(long)]
         apply_types: bool,
     },
-    /// Import normalized runtime observations while the binary is paused.
-    /// Preview a structured type proposal against the current Ghidra program.
+    /// Preview and merge structured type proposals against the current Ghidra program.
     PreviewTypes {
-        result: String,
+        #[arg(required = true)]
+        results: Vec<String>,
     },
     /// Apply an exact type preview and refresh Ghidra evidence.
     ApplyTypes {
@@ -53,6 +53,7 @@ enum Command {
     Refresh {
         binary: String,
     },
+    /// Import normalized runtime observations while the binary is paused.
     ImportTrace {
         binary: String,
         path: PathBuf,
@@ -182,10 +183,10 @@ async fn run(cli: Cli) -> Result<()> {
         Command::OpenGhidra { binary } => {
             piston_decompiler::desktop::open(&config, &binary).await?
         }
-        Command::PreviewTypes { result } => println!(
+        Command::PreviewTypes { results } => println!(
             "{}",
             serde_json::to_string_pretty(
-                &piston_decompiler::types::preview(&db, &config, &result).await?
+                &piston_decompiler::types::preview_many(&db, &config, &results).await?
             )?
         ),
         Command::ApplyTypes { operation } => {

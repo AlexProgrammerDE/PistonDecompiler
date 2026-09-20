@@ -25,6 +25,8 @@ pub struct Trace {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Event {
     pub sequence: u64,
+    #[serde(default)]
+    pub timestamp_us: u64,
     pub thread: u64,
     /// Entry point relative to the module base. Never an arbitrary instruction address.
     pub function_rva: Option<u64>,
@@ -34,6 +36,14 @@ pub struct Event {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Observation {
+    Marker {
+        label: String,
+    },
+    Region {
+        allocation: String,
+        address: u64,
+        size: u64,
+    },
     Block {
         block_rva: u64,
         hits: u64,
@@ -74,6 +84,12 @@ pub enum Observation {
         allocation: String,
         offset: u64,
         bytes: String,
+        #[serde(default)]
+        invocation: Option<u64>,
+        #[serde(default)]
+        phase: Option<String>,
+        #[serde(default)]
+        argument_index: Option<u8>,
     },
 }
 impl Trace {
@@ -105,7 +121,15 @@ impl Trace {
                     .context("Code address overflow")?;
             }
             match &event.observation {
-                Observation::Allocation {
+                Observation::Marker { label } => {
+                    ensure!(!label.is_empty() && label.len() <= 256, "Invalid marker");
+                }
+                Observation::Region {
+                    allocation,
+                    address,
+                    size,
+                }
+                | Observation::Allocation {
                     allocation,
                     address,
                     size,
@@ -147,7 +171,15 @@ impl Trace {
                     allocation,
                     offset,
                     bytes,
+                    phase,
+                    ..
                 } => {
+                    ensure!(
+                        phase
+                            .as_deref()
+                            .is_none_or(|p| ["entry", "return"].contains(&p)),
+                        "Invalid snapshot phase"
+                    );
                     let size = allocations
                         .get(allocation)
                         .context("Snapshot outside allocation lifetime")?;
@@ -202,7 +234,7 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
     let trace: Trace = serde_json::from_slice(&bytes)?;
     trace.validate()?;
     let hash = hex::encode(Sha256::digest(&bytes));
-    let mut tx = db.pool.begin().await?;
+    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
     let (sha, paused): (String, bool) =
         sqlx::query_as("SELECT sha256,paused FROM binaries WHERE id=?")
             .bind(binary)
@@ -296,7 +328,9 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
         .events
         .iter()
         .filter_map(|event| {
-            if let Observation::Allocation { allocation, .. } = &event.observation {
+            if let Observation::Allocation { allocation, .. }
+            | Observation::Region { allocation, .. } = &event.observation
+            {
                 Some((
                     allocation.as_str(),
                     serde_json::to_string(event).expect("serializable event"),
@@ -306,7 +340,15 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
             }
         })
         .collect();
+    let markers: Vec<String> = trace
+        .events
+        .iter()
+        .filter(|e| matches!(e.observation, Observation::Marker { .. }))
+        .take(64)
+        .map(serde_json::to_string)
+        .collect::<Result<_, _>>()?;
     for (function, mut lines) in evidence {
+        lines.splice(0..0, markers.clone());
         let allocation_ids: std::collections::BTreeSet<String> = lines
             .iter()
             .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -318,7 +360,7 @@ pub async fn import(db: &Db, binary: &str, path: &Path) -> Result<String> {
             .collect();
         lines.splice(0..0, allocations);
         let content = format!(
-            "Runtime observations from scenario {:?}, session {}. Samples are incomplete. Dropped events: {}.\n{}",
+            "Runtime observations from scenario {:?}, session {}. Snapshots are samples, not proof of an instruction write. Region identity has unknown allocation lifetime. Times are microseconds since collector start; cross-thread ordering is observational, not causal. Samples are incomplete. Dropped events: {}.\n{}",
             trace.scenario,
             trace.id,
             trace.dropped_events,

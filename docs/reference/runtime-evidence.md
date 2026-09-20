@@ -34,7 +34,7 @@ Bound input sizes, event counts, individual values, and model context independen
 ## Collector approach
 
 A Frida adapter can collect selected function arguments, return values, object snapshots, and allocator lifetimes.
-Stalker can collect scoped call and block coverage. Instruction access tracing requires a separate bounded instrumentation mode.
+Stalker can collect scoped call and block coverage. The managed recorder offers a bounded scalar x86-64 MOV access mode.
 Platform allocator hooks and ABI descriptions must be explicit. Custom allocators require configured hooks.
 
 API reference: [Frida JavaScript API](https://frida.re/docs/javascript-api/).
@@ -67,7 +67,12 @@ Event sequence numbers increase strictly within a session.
 `image_base` is the Ghidra image base. `function_rva` identifies an entry point relative to the loaded module base.
 A collector must subtract the runtime module base before it emits this field.
 
-The implemented event variants are `coverage`, `block`, `call`, `argument`, `return`, `allocation`, `free`, `memory`, and `snapshot`.
+The implemented event variants are `coverage`, `block`, `call`, `argument`, `return`, `allocation`, `free`, `memory`, `snapshot`, `region`, and `marker`.
+`region` uses the allocation-shaped address and size fields but makes no claim about an allocation lifetime.
+Snapshots can include `invocation`, `phase` (`entry` or `return`), and `argument_index`.
+Events can include `timestamp_us`, measured from collector startup with millisecond resolution.
+Buffered Stalker timestamps reflect delivery, not exact instruction execution time. Thread order does not establish cross-thread causality.
+Markers contain a `label` and enter each observed function’s bounded evidence context.
 The Rust definitions in `src/runtime.rs` specify the fields for each variant.
 Dedicated vtable events and multi-process sessions remain extensions to this format.
 

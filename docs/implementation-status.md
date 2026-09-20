@@ -5,12 +5,16 @@ The architecture documents define the target. The current implementation exposes
 ## Implemented
 
 - Static Ghidra evidence, type context, call edges, and SCC membership.
+- Explicit import-thunk and non-executable entry classification before paid analysis.
 - Component dependency barriers for queued, running, batched, and uncertain callee work.
 - Runtime trace validation, idempotent ingestion, observed call edges, and citable runtime artifacts.
-- A Frida collector for selected arguments, returns, allocation lifetimes, snapshots, calls, and blocks.
+- A managed Frida recorder with launch/attach, markers, manual Stop, automatic import, and recorded-function analysis.
+- Durable journals, interrupted-session recovery, and native Ghidra coverage bookmarks with save verification.
+- Selected argument slots, returns, allocation lifetimes, snapshots, calls, blocks, and bounded x86-64 MOV memory observations.
 - Coverage reports with per-scenario marginal coverage and unresolved-region ranking.
 - Structured structures, enums, pointers, arrays, function pointers, and method signatures.
 - Layout validation, evidence-linked proposals, Jev assessment, and bounded provider accounting.
+- Optional provider JSON Schema responses and numbered evidence for citation checks.
 - Exact Ghidra previews, transactional type changes, class namespaces, and operation reconciliation.
 - Refreshed decompilation without loss of historical evidence, reviews, or accounting.
 - Bounded recovery iterations, fixed SCC evidence snapshots, oscillation detection, and graph-change replanning.
@@ -27,15 +31,15 @@ Parallel component recovery with coordinated type writes remains an optimization
 Type application currently re-exports the whole Ghidra program.
 Only changed evidence invalidates prior results, but targeted export remains an optimization for large programs.
 
-The collector targets one main module and `malloc`/`free` allocations.
-Custom allocators, instruction-level memory instrumentation, and multi-module capture require additional adapters.
-The importer already accepts normalized memory observations from such adapters.
+The collector targets one main module. Configured allocator profiles use allocation/release functions with explicit argument slots.
+Memory instruction tracing currently covers scalar x86-64 MOV operations. Other instructions and architectures need adapters.
+Multi-module capture, floating-point argument decoding, and arbitrary allocator contracts remain extensions.
 
 Type recovery does not yet represent unions, bitfields, inheritance metadata, or explicit parameter storage.
 The system preserves unresolved facts rather than manufacturing these layouts.
 
-Runtime session management, type previews, and recovery controls currently use CLI commands.
-Dedicated web controls for these operations remain to be built.
+Runtime session management and recorded-function analysis have web controls.
+Structured type previews and the full iterative recovery command still use the CLI.
 A restarted recovery command creates new analysis runs. It does not automatically resume a partially completed component iteration.
 
 ## Validation

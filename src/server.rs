@@ -33,6 +33,88 @@ fn status(error: anyhow::Error) -> Status {
 }
 #[tonic::async_trait]
 impl PistonService for Service {
+    async fn start_recording(
+        &self,
+        r: Request<proto::StartRecordingRequest>,
+    ) -> Result<Response<proto::Recording>, Status> {
+        let permit = self.ghidra_gate.clone().try_acquire_owned().map_err(|_| {
+            Status::resource_exhausted("Wait for the current Ghidra or recording operation")
+        })?;
+        let id = crate::recording::start(&self.db, &self.config, &r.into_inner())
+            .await
+            .map_err(status)?;
+        let response = crate::recording::get(&self.db, &self.config, &id)
+            .await
+            .map_err(status)?;
+        let service = self.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            if let Err(error) =
+                crate::recording::run(&service.db, &service.config, &id, service.shutdown.clone())
+                    .await
+            {
+                let _ = crate::recording::fail(&service.db, &id, &error).await;
+            } else {
+                let _ = crate::recording::publish(&service.db, &service.config, &id).await;
+            }
+        });
+        Ok(Response::new(response))
+    }
+    async fn list_recordings(
+        &self,
+        r: Request<proto::BinaryRequest>,
+    ) -> Result<Response<proto::RecordingList>, Status> {
+        Ok(Response::new(
+            crate::recording::list(&self.db, &self.config, &r.into_inner().binary_id)
+                .await
+                .map_err(status)?,
+        ))
+    }
+    async fn control_recording(
+        &self,
+        r: Request<proto::RecordingControl>,
+    ) -> Result<Response<proto::Recording>, Status> {
+        let r = r.into_inner();
+        match r.action.as_str() {
+            "stop" | "marker" => {
+                crate::recording::command(&self.db, &self.config, &r.id, &r.action, &r.label)
+                    .await
+                    .map_err(status)?
+            }
+            "recover" | "publish" => {
+                let permit = self.ghidra_gate.clone().try_acquire_owned().map_err(|_| {
+                    Status::resource_exhausted("Wait for the current Ghidra or recording operation")
+                })?;
+                let service = self.clone();
+                let id = r.id.clone();
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    if r.action == "recover"
+                        && let Err(error) =
+                            crate::recording::recover(&service.db, &service.config, &id).await
+                    {
+                        let _ = crate::recording::fail(&service.db, &id, &error).await;
+                        return;
+                    }
+                    let _ = crate::recording::publish(&service.db, &service.config, &id).await;
+                });
+            }
+            "analyze" => {
+                let _permit = self.ghidra_gate.clone().try_acquire_owned().map_err(|_| {
+                    Status::resource_exhausted("Wait for the current recording operation")
+                })?;
+                crate::recording::analyze(&self.db, &self.ai, &r.id)
+                    .await
+                    .map_err(status)?;
+            }
+            _ => return Err(Status::invalid_argument("Unknown recording action")),
+        }
+        Ok(Response::new(
+            crate::recording::get(&self.db, &self.config, &r.id)
+                .await
+                .map_err(status)?,
+        ))
+    }
     async fn list_binaries(
         &self,
         _: Request<proto::Empty>,
@@ -131,7 +213,6 @@ impl PistonService for Service {
                     updated_at: r.get("updated_at"),
                     started_at: r.get::<Option<i64>, _>("started_at").unwrap_or(0),
                     finished_at: r.get::<Option<i64>, _>("finished_at").unwrap_or(0),
-                    reserved_usd: r.get("reserved_usd"),
                 })
                 .collect(),
         }))
@@ -366,7 +447,7 @@ impl PistonService for Service {
             model: ai.model.clone(),
             escalation_model: ai.escalation_model.clone(),
             concurrency: ai.concurrency as u32,
-            budget_usd: ai.budget_usd,
+
             max_input_bytes: ai.max_input_bytes as u32,
             provider_url: ai.base_url.clone(),
             batch_enabled: ai.batch_enabled,
