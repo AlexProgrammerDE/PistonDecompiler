@@ -279,7 +279,7 @@ impl Ai {
         }
         Ok(())
     }
-    fn response_format(&self) -> Value {
+    fn response_format(&self, evidence: &[SuppliedEvidence]) -> Value {
         if self.config.structured_outputs {
             let mut schema = json!(schemars::schema_for!(Analysis));
             // Old stored analyses may omit claims, but new provider output must cite evidence.
@@ -287,14 +287,22 @@ impl Ai {
                 .as_array_mut()
                 .unwrap()
                 .push(json!("claims"));
+            schema["$defs"]["EvidenceReference"]["properties"]["artifact_id"]["enum"] =
+                json!(evidence.iter().map(|e| &e.artifact_id).collect::<Vec<_>>());
             json!({"type":"json_schema","json_schema":{"name":"binary_analysis","schema":schema}})
         } else {
             json!({"type":"json_object"})
         }
     }
 
-    pub fn body(&self, messages: &[Value], stage: &str, tools: bool) -> Value {
-        let mut body = json!({"model":self.config.model_for(stage),"messages":messages,"max_tokens":self.config.max_output_tokens,"response_format":self.response_format()});
+    pub fn body(
+        &self,
+        messages: &[Value],
+        stage: &str,
+        tools: bool,
+        evidence: &[SuppliedEvidence],
+    ) -> Value {
+        let mut body = json!({"model":self.config.model_for(stage),"messages":messages,"max_tokens":self.config.max_output_tokens,"response_format":self.response_format(evidence)});
         if let Some(effort) = &self.config.reasoning_effort {
             body["reasoning"] = json!({"effort": effort});
         }
@@ -326,13 +334,14 @@ impl Ai {
         messages: &[Value],
         stage: &str,
         tools: bool,
+        evidence: &[SuppliedEvidence],
     ) -> Result<Value> {
         // Keep the wire JSON intact, including optional provider billing fields.
         let response = self
             .client
             .post(self.endpoint("chat/completions"))
             .bearer_auth(self.key()?)
-            .json(&self.body(messages, stage, tools))
+            .json(&self.body(messages, stage, tools, evidence))
             .send()
             .await?;
         crate::billing::response(response).await
@@ -384,7 +393,7 @@ impl Ai {
             };
             let value = tokio::time::timeout(
                 Duration::from_secs(self.config.request_timeout_secs),
-                self.completion_response(&messages, stage, tools),
+                self.completion_response(&messages, stage, tools, &prompt.evidence),
             )
             .await??;
             let reported = crate::billing::record(db, receipt.as_deref(), &value).await?;

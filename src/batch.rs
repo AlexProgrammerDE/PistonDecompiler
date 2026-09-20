@@ -49,7 +49,7 @@ pub async fn submit(db: &Db, ai: &Ai, config: &Config, binary: &str) -> Result<S
                     pipeline::fail_before_dispatch(db,ai,&job,"Pinned provider settings differ from this batch. Use the original configuration or a new run.").await?;
                     continue;
                 }
-                lines.push_str(&serde_json::to_string(&json!({"custom_id":job.id,"method":"POST","url":"/v1/chat/completions","body":ai.body(&prompt.messages,"map",false)}))?);
+                lines.push_str(&serde_json::to_string(&json!({"custom_id":job.id,"method":"POST","url":"/v1/chat/completions","body":ai.body(&prompt.messages,"map",false,&prompt.evidence)}))?);
                 lines.push('\n');
                 manifest.hashes.insert(job.id.clone(), prompt.hash);
             }

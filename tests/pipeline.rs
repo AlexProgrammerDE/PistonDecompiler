@@ -420,3 +420,26 @@ async fn validation_retry_adds_feedback_without_replacing_pinned_evidence() {
     assert_eq!(db.overview("b").await.unwrap().cost_usd, Some(0.002));
     server.abort();
 }
+
+#[tokio::test]
+async fn citation_schema_tracks_the_supplied_artifacts() {
+    let (_dir, db, mut ai) = fixture().await;
+    ai.config.structured_outputs = true;
+    let mut prompt = ai.prompt(&db, "b:00000001", "map").await.unwrap();
+    for _ in 0..2 {
+        let body = ai.body(&prompt.messages, "map", false, &prompt.evidence);
+        let allowed = &body["response_format"]["json_schema"]["schema"]["$defs"]["EvidenceReference"]
+            ["properties"]["artifact_id"]["enum"];
+        assert_eq!(
+            *allowed,
+            json!(
+                prompt
+                    .evidence
+                    .iter()
+                    .map(|e| &e.artifact_id)
+                    .collect::<Vec<_>>()
+            )
+        );
+        prompt.evidence.pop();
+    }
+}
