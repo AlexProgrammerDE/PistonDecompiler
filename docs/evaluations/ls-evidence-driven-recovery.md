@@ -3,7 +3,9 @@
 The revised policy selected 107 of 197 functions for pass 2 (54.3%).
 The previous policy selected 189 (95.9%). That is 82 fewer functions, a 43.4% reduction.
 
-This is a checkpoint report. The corrected pass 2 is running; its final cost and pass-3 selection are not yet measured.
+All three passes and native Ghidra writeback are complete. Pass 3 selected 44 functions, or 22.3% of the original 197. All selected functions completed analysis and verification.
+
+The cycle stopped at the three-pass limit with 86 functions retaining uncertain or unapplied fields. Its terminal status is `deferred`; this does not request manual review. See the [readability comparison](ls-readability.md) for measured improvements and limitations.
 
 ## Conditions
 
@@ -54,12 +56,19 @@ Missing costs are unknown, not zero.
 
 | Scope | Reported cost, USD | Missing cost receipts |
 | --- | ---: | ---: |
-| Completed pass 1 | 0.6481689604 | 15 |
+| Completed pass 1, 197 functions | 0.6481689604 | 15 |
+| Completed pass 2, 107 functions | 0.3066581596 | 4 |
+| Completed pass 3, 44 functions | 0.1319140364 | 2 |
 | Interrupted diagnostic attempt | 0.0330012806 | 0 |
 | Previous policy's completed pass 2 | 0.93929789 | 27 |
 
-The corrected pass 2 is still accumulating receipts. Its final cost cannot yet be compared with the previous pass 2.
-Completed scopes have reported $0.6811702410. Add the corrected pass-2 charges and any unreported costs.
+The three completed passes reported $1.0867411564. Including the interrupted diagnostic attempt, the experiment reported $1.1197424370. There are 21 missing cost receipts across the completed passes.
+
+Passes 2 and 3 together reported $0.4385721960, 53.3% less than the previous pass 2 alone. The corrected pass 2 alone reported 67.4% less. These compare reported charges, not complete invoices or controlled runs from identical starting states.
+
+The three native type operations applied 57, 37, and 9 result plans. Their definition/signature counts were 7/55, 6/35, and 2/9. These overlap across passes and must not be summed as unique recovered types. None applied explicit local-variable refinements after the native identity fallback.
+
+A read-only reopening of a copy of the saved Ghidra project reproduced all 416 exported function names, comments, pseudocode bodies, and parsed type contexts. No definitions were replayed for this check.
 
 ## Reproducibility
 
@@ -68,6 +77,7 @@ Completed scopes have reported $0.6811702410. Add the corrected pass-2 charges a
 - Interrupted attempt: `144d1fef-24f5-4b62-b40f-cbb588574616`.
 - Corrected cycle: `9e3fe8cc-a06d-42f4-9653-a7945b9da60c`.
 - Corrected pass-2 run: `e9930bf8-6130-4016-8b51-762c0bd997aa`.
+- Pass-3 run: `fd0a8d36-e485-41d0-828b-d45a1263e279`.
 
 `recovery_passes` preserves the selected counts and run IDs.
 Join `provider_requests.job_id` to `jobs.id`, then group by `jobs.run_id` for native charges.
