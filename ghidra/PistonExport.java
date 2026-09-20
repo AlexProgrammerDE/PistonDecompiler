@@ -3,6 +3,7 @@
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.pcode.*;
 import ghidra.program.model.symbol.Reference;
 import com.google.gson.Gson;
 import java.nio.file.*;
@@ -114,6 +115,68 @@ public class PistonExport extends GhidraScript {
         }
     }
 
+    private record Origin(int parameter, long offset) {}
+    // Follow only lossless, constant-offset SSA operations. Loads and ambiguous
+    // merges do not prove that two pointers refer to the same object.
+    private Origin origin(Varnode node, HighFunction high, int depth) {
+        if(node==null || depth>16) return null;
+        var prototype=high.getFunctionPrototype();
+        for(int i=0;i<prototype.getNumParams();i++) {
+            if(node.isInput()) for(var storage:prototype.getParam(i).getStorage().getVarnodes())
+                if(storage.getAddress().equals(node.getAddress()) && storage.getSize()==node.getSize()) return new Origin(i,0);
+        }
+        var op=node.getDef();
+        if(op==null) return null;
+        int opcode=op.getOpcode();
+        if((opcode==PcodeOp.COPY || opcode==PcodeOp.CAST) && op.getInput(0).getSize()==node.getSize())
+            return origin(op.getInput(0),high,depth+1);
+        if((opcode==PcodeOp.INT_ADD || opcode==PcodeOp.PTRSUB) && op.getInput(1).isConstant()) {
+            var base=origin(op.getInput(0),high,depth+1);
+            if(base!=null) return new Origin(base.parameter(),base.offset()+op.getInput(1).getOffset());
+        }
+        if(opcode==PcodeOp.PTRADD && op.getInput(1).isConstant() && op.getInput(2).isConstant()) {
+            var base=origin(op.getInput(0),high,depth+1);
+            if(base!=null) return new Origin(base.parameter(),base.offset()+op.getInput(1).getOffset()*op.getInput(2).getOffset());
+        }
+        return null;
+    }
+    private Map<String,Object> objectEvidence(HighFunction high) {
+        List<Map<String,Object>> parameters=new ArrayList<>(),accesses=new ArrayList<>(),flows=new ArrayList<>(),constraints=new ArrayList<>();
+        if(high==null) return Map.of("available",false);
+        var prototype=high.getFunctionPrototype();
+        for(int i=0;i<prototype.getNumParams();i++) {
+            var symbol=prototype.getParam(i);var type=symbol.getDataType();
+            Map<String,Object> parameter=new LinkedHashMap<>();
+            parameter.put("index",i);parameter.put("name",symbol.getName());parameter.put("type",type.getPathName());parameter.put("width",type.getLength());
+            if(type instanceof ghidra.program.model.data.Pointer pointer && pointer.getDataType() instanceof ghidra.program.model.data.Structure structure) {
+                parameter.put("object_type",structure.getPathName());
+                parameter.put("layout",structure.toString());
+                parameter.put("extent",Objects.toString(structure.getDescription(),""));
+            }
+            parameters.add(parameter);
+        }
+        var operations=high.getPcodeOps();int count=0;
+        while(operations.hasNext() && count++<20000) {
+            var op=operations.next();int opcode=op.getOpcode();String site=op.getSeqnum().getTarget().toString();
+            if((opcode==PcodeOp.LOAD || opcode==PcodeOp.STORE) && accesses.size()<256) {
+                var base=origin(op.getInput(1),high,0);
+                var value=opcode==PcodeOp.LOAD?op.getOutput():op.getInput(2);
+                if(base!=null && base.offset()>=0 && base.offset()<1048576)
+                    accesses.add(Map.of("parameter",base.parameter(),"offset",base.offset(),"width",value.getSize(),"access",opcode==PcodeOp.LOAD?"read":"write","site",site));
+            }
+            if(opcode==PcodeOp.CALL && flows.size()<256) {
+                var target=currentProgram.getFunctionManager().getFunctionAt(op.getInput(0).getAddress());
+                if(target!=null) for(int i=1;i<op.getNumInputs() && flows.size()<256;i++) {
+                    var base=origin(op.getInput(i),high,0);
+                    if(base!=null) flows.add(Map.of("parameter",base.parameter(),"offset",base.offset(),"target",target.getEntryPoint().toString(),"target_parameter",i-1,"site",site));
+                }
+            }
+            if(constraints.size()<128 && (opcode==PcodeOp.INT_SLESS || opcode==PcodeOp.INT_SLESSEQUAL || opcode==PcodeOp.INT_LESS || opcode==PcodeOp.INT_LESSEQUAL || opcode==PcodeOp.INT_EQUAL || opcode==PcodeOp.INT_NOTEQUAL || opcode==PcodeOp.RETURN || opcode==PcodeOp.CALL))
+                constraints.add(Map.of("site",site,"operation",op.toString()));
+        }
+        return Map.of("available",true,"parameters",parameters,"accesses",accesses,"flows",flows,"constraints",constraints,"bounded",true);
+    }
+
     @Override public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length != 1) throw new IllegalArgumentException("Expected export path");
@@ -148,6 +211,7 @@ public class PistonExport extends GhidraScript {
                 row.put("address", function.getEntryPoint().toString());
                 row.put("name", function.getName());
                 Map<String,Object> typeContext=new LinkedHashMap<>();
+                typeContext.put("address",function.getEntryPoint().toString());
                 typeContext.put("prototype",function.getPrototypeString(true,true));
                 typeContext.put("namespace",function.getParentNamespace().getName(true));
                 typeContext.put("calling_convention",function.getCallingConventionName());
@@ -231,6 +295,7 @@ public class PistonExport extends GhidraScript {
                 cpp.put("wrapper_candidate",function.isThunk() || (callees.size()==1 && function.getBody().getNumAddresses()<64));
                 cpp.put("rtti_and_symbols_are_hints",true);
                 typeContext.put("cpp",cpp);
+                typeContext.put("objects",objectEvidence(result.getHighFunction()));
                 row.put("type_context",new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(typeContext));
                 row.put("callees", callees);
                 row.put("imports", imports);

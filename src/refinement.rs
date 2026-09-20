@@ -62,8 +62,26 @@ pub fn types(raw: &str) -> Value {
 
 /// Include direct callees even if their summaries did not fit in the prompt.
 pub async fn sources(db: &Db, function: &str) -> Result<BTreeMap<String, String>> {
-    let rows = sqlx::query("SELECT id,pcode,type_context FROM functions WHERE id=? OR id IN (SELECT callee FROM edges WHERE caller=?) ORDER BY id")
-        .bind(function).bind(function).fetch_all(&db.pool).await?;
+    let mut ids = crate::objects::related_functions(db, function).await?;
+    let adjacent: Vec<String> = sqlx::query_scalar(
+        "SELECT callee FROM edges WHERE caller=? UNION SELECT caller FROM edges WHERE callee=?",
+    )
+    .bind(function)
+    .bind(function)
+    .fetch_all(&db.pool)
+    .await?;
+    ids.extend(adjacent);
+    ids.insert(function.to_owned());
+    let mut rows = Vec::new();
+    for id in ids {
+        if let Some(row) = sqlx::query("SELECT id,pcode,type_context FROM functions WHERE id=?")
+            .bind(id)
+            .fetch_optional(&db.pool)
+            .await?
+        {
+            rows.push(row);
+        }
+    }
     let mut stamps = BTreeMap::new();
     for row in rows {
         let id: String = row.get("id");

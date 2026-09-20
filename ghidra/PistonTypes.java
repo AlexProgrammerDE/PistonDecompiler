@@ -13,6 +13,7 @@ public class PistonTypes extends GhidraScript {
     private final CategoryPath category = new CategoryPath("/PistonRecovered");
     private final Map<String,DataType> types = new HashMap<>();
     private DataTypeManager manager;
+    private JsonObject trialReport;
 
     private DataType resolve(JsonObject ref) throws Exception {
         switch (ref.get("kind").getAsString()) {
@@ -113,7 +114,7 @@ public class PistonTypes extends GhidraScript {
             if(currentProgram.getSymbolTable().getNamespace(name,currentProgram.getGlobalNamespace())==null)
                 currentProgram.getSymbolTable().createClass(currentProgram.getGlobalNamespace(),name,SourceType.USER_DEFINED);
             currentProgram.getOptions("Piston C++ layouts").setString(name,layout.toString());
-            types.get(name).setDescription("Evidence-backed C++ layout: "+layout);
+            types.get(name).setDescription(Objects.toString(types.get(name).getDescription(),"")+"; C++ layout hypothesis: "+layout);
         }
         int width=currentProgram.getDefaultPointerSize();
         for(var item:items(cpp(plan),"vtables")) {
@@ -137,6 +138,16 @@ public class PistonTypes extends GhidraScript {
         }
     }
 
+    private JsonObject savedState(String encoded) {
+        var state=JsonParser.parseString(encoded).getAsJsonObject();
+        // Historical operation snapshots predate layout extent metadata.
+        // Missing metadata means unknown, never an exact-size assertion.
+        if(state.has("definitions")) for(var entry:state.getAsJsonObject("definitions").entrySet()) {
+            if(entry.getValue().isJsonObject() && !entry.getValue().getAsJsonObject().has("extent"))
+                entry.getValue().getAsJsonObject().addProperty("extent","");
+        }
+        return state;
+    }
     private JsonObject state(JsonObject plan) throws Exception {
         JsonObject state=new JsonObject();
         state.addProperty("pointer_width",currentProgram.getDefaultPointerSize());
@@ -145,7 +156,7 @@ public class PistonTypes extends GhidraScript {
             String name=e.getAsJsonObject().get("name").getAsString();
             DataType type=manager.getDataType(category,name);
             if(type==null) {definitions.add(name,JsonNull.INSTANCE);continue;}
-            JsonObject value=new JsonObject();value.addProperty("description",type.toString());value.addProperty("size",type.getLength());
+            JsonObject value=new JsonObject();value.addProperty("description",type.toString());value.addProperty("extent",currentProgram.getOptions("Piston layout extents").getString(name,""));value.addProperty("size",type.getLength());
             if(type instanceof Structure) {
                 JsonArray fields=new JsonArray();
                 for(DataTypeComponent field:((Structure)type).getDefinedComponents()) {
@@ -174,17 +185,83 @@ public class PistonTypes extends GhidraScript {
         if(stored.isEmpty()) throw new IllegalStateException("Saved type operation marker is missing");
         if(!plan.equals(JsonParser.parseString(stored))) throw new IllegalStateException("Saved type plan differs from the applied operation");
         if(appliedState.isEmpty()) throw new IllegalStateException("Saved type state marker is missing");
-        if(!state(plan).equals(JsonParser.parseString(appliedState)))
+        if(!state(plan).equals(savedState(appliedState)))
             throw new IllegalStateException("Saved type state differs: expected " + appliedState + "; actual " + gson.toJson(state(plan)));
+    }
+    private boolean exact(JsonObject definition) {
+        return definition.has("extent") && definition.getAsJsonObject("extent").get("kind").getAsString().equals("exact");
+    }
+    private record Quality(int artifacts, String warning) {}
+    private Map<String,Quality> measure(JsonObject plan) throws Exception {
+        Map<String,Quality> values=new TreeMap<>();
+        Set<String> affected=new TreeSet<>();
+        for(var item:plan.getAsJsonArray("signatures")) {
+            var function=currentProgram.getFunctionManager().getFunctionAt(toAddr(item.getAsJsonObject().get("address").getAsString()));
+            if(function!=null) {
+                affected.add(function.getEntryPoint().toString());
+                for(var caller:function.getCallingFunctions(monitor)) affected.add(caller.getEntryPoint().toString());
+            }
+        }
+        for(var item:items(cpp(plan),"locals")) affected.add(item.getAsJsonObject().get("function").getAsString());
+        // A shared type can affect global accesses and transitive callers too.
+        // Check the whole program for layout plans instead of sampling users.
+        var functions=currentProgram.getFunctionManager().getFunctions(true);
+        var decompiler=new ghidra.app.decompiler.DecompInterface();
+        try {
+            decompiler.openProgram(currentProgram);
+            while(functions.hasNext()) {
+                monitor.checkCancelled();var function=functions.next();
+                if(function.isExternal() || function.isThunk()) continue;
+                String address=function.getEntryPoint().toString();
+                if(plan.getAsJsonArray("definitions").isEmpty() && !affected.contains(address)) continue;
+                var result=decompiler.decompileFunction(function,30,monitor);
+                if(!result.decompileCompleted() || result.getDecompiledFunction()==null) {
+                    values.put(address,new Quality(-1,"unavailable"));continue;
+                }
+                String text=result.getDecompiledFunction().getC().replaceAll("(?s)/\\*.*?\\*/","");
+                int artifacts=(int)java.util.regex.Pattern.compile("\\b(?:CONCAT|SUB)\\d+\\s*\\(").matcher(text).results().count();
+                values.put(address,new Quality(artifacts,Objects.toString(result.getErrorMessage(),"")));
+            }
+        } finally { decompiler.dispose(); }
+        return values;
+    }
+    private void verifyTrial(Map<String,Quality> before, Map<String,Quality> after) {
+        for(var entry:before.entrySet()) {
+            var a=entry.getValue();var b=after.get(entry.getKey());
+            if(a.artifacts()<0) continue;
+            if(b==null || b.artifacts()<0 || b.artifacts()>a.artifacts() || !b.warning().equals(a.warning()))
+                throw new IllegalStateException("Type trial regresses decompilation at "+entry.getKey());
+        }
     }
     @Override public void run() throws Exception {
         String[] args=getScriptArgs();
         if(args.length!=5) throw new IllegalArgumentException("Expected mode, operation, plan, expected, report");
+        Program live=currentProgram;
+        Program shadow=null;
+        try {
+            if(args[0].equals("preview")) {
+                shadow=(Program)live.getDomainFile().getReadOnlyDomainObject(this,-1,monitor);
+                if(shadow==live) throw new IllegalStateException("Type trials require an isolated program");
+                currentProgram=shadow;
+            }
+            executePlan(args);
+        } catch(Exception error) {
+            if(!args[0].equals("preview")) throw error;
+            monitor.checkCancelled();
+            JsonObject rejected=trialReport==null?new JsonObject():trialReport;rejected.addProperty("status","rejected");
+            rejected.addProperty("error",error.getMessage());
+            Files.writeString(Path.of(args[4]),gson.toJson(rejected));
+        } finally { currentProgram=live;if(shadow!=null) shadow.release(this); }
+    }
+    private void executePlan(String[] args) throws Exception {
+
         manager=currentProgram.getDataTypeManager();
         JsonObject plan=JsonParser.parseString(Files.readString(Path.of(args[2]))).getAsJsonObject();
-        JsonObject report=new JsonObject();
+        JsonObject report=new JsonObject();trialReport=report;
         boolean preview=args[0].equals("preview");
         JsonObject before=state(plan);
+        Map<String,Quality> baseline=preview?measure(plan):Map.of();
+        if(preview) report.add("before_metrics",gson.toJsonTree(baseline));
         if(preview) report.add("expected",before);
         if(preview || args[0].equals("apply")) {
             String encoded=gson.toJson(plan);
@@ -192,10 +269,10 @@ public class PistonTypes extends GhidraScript {
             if(!prior.isEmpty() && !prior.equals(encoded)) throw new IllegalStateException("Operation identity conflict");
             if(!prior.isEmpty()) {
                 String appliedState=currentProgram.getOptions("PistonDecompiler").getString(args[1]+".state","");
-                if(appliedState.isEmpty() || !state(plan).equals(JsonParser.parseString(appliedState))) throw new IllegalStateException("Applied values changed outside this operation");
+                if(appliedState.isEmpty() || !state(plan).equals(savedState(appliedState))) throw new IllegalStateException("Applied values changed outside this operation");
             }
             if(prior.isEmpty()) {
-                JsonObject expected=preview ? before : JsonParser.parseString(Files.readString(Path.of(args[3]))).getAsJsonObject();
+                JsonObject expected=preview ? before : savedState(Files.readString(Path.of(args[3])));
                 if(!state(plan).equals(expected)) throw new IllegalStateException("Ghidra types or signatures changed since preview");
                 int transaction=currentProgram.startTransaction("Piston type recovery");boolean success=false;
                 try {
@@ -215,14 +292,31 @@ public class PistonTypes extends GhidraScript {
                     for(JsonElement e:plan.getAsJsonArray("definitions")) {
                         JsonObject d=e.getAsJsonObject();if(!d.get("kind").getAsString().equals("structure"))continue;
                         Structure structure=(Structure)types.get(d.get("name").getAsString());
-                        structure.deleteAll();structure.setPackingEnabled(false);structure.growStructure(d.get("size").getAsInt());
+                        int requested=d.get("size").getAsInt();
+                        if(exact(d) && structure.getLength()>requested) throw new IllegalStateException("Complete size would discard existing layout evidence");
+                        String oldExtent=currentProgram.getOptions("Piston layout extents").getString(structure.getName(),"");
+                        if(!oldExtent.isEmpty() && JsonParser.parseString(oldExtent).getAsJsonObject().get("kind").getAsString().equals("exact") && requested>structure.getLength())
+                            throw new IllegalStateException("New layout exceeds previously established complete size");
+                        if(requested>structure.getLength()) structure.growStructure(requested-structure.getLength());
+                        JsonObject extent=d.has("extent")?d.getAsJsonObject("extent"):JsonParser.parseString("{\"kind\":\"minimum\"}").getAsJsonObject();
+                        if(!exact(d) && !oldExtent.isEmpty()) extent=JsonParser.parseString(oldExtent).getAsJsonObject();
+                        currentProgram.getOptions("Piston layout extents").setString(structure.getName(),extent.toString());
+                        structure.setDescription("Recovered layout extent: "+extent+"; gaps are unknown bytes, not proven padding.");
                     }
                     for(JsonElement e:plan.getAsJsonArray("definitions")) {
                         JsonObject d=e.getAsJsonObject();if(!d.get("kind").getAsString().equals("structure"))continue;
                         Structure structure=(Structure)types.get(d.get("name").getAsString());
                         for(JsonElement f:d.getAsJsonArray("fields")) {
                             JsonObject field=f.getAsJsonObject();DataType type=resolve(field.getAsJsonObject("data_type"));
-                            structure.replaceAtOffset(field.get("offset").getAsInt(),type,type.getLength(),field.get("name").getAsString(),null);
+                            int offset=field.get("offset").getAsInt();
+                            for(var existing:structure.getDefinedComponents()) {
+                                if(existing.getOffset()<offset+type.getLength() && existing.getEndOffset()>=offset &&
+                                    (existing.getOffset()!=offset || existing.getLength()!=type.getLength()))
+                                    throw new IllegalStateException("Proposed field overlaps existing layout evidence");
+                                if(Objects.equals(existing.getFieldName(),field.get("name").getAsString()) && existing.getOffset()!=offset)
+                                    throw new IllegalStateException("Field identity has conflicting offsets");
+                            }
+                            structure.replaceAtOffset(offset,type,type.getLength(),field.get("name").getAsString(),null);
                         }
                     }
                     for(JsonElement e:plan.getAsJsonArray("signatures")) {
@@ -254,10 +348,15 @@ public class PistonTypes extends GhidraScript {
                     }
                     for(JsonElement e:plan.getAsJsonArray("definitions")) {
                         JsonObject d=e.getAsJsonObject();DataType type=types.get(d.get("name").getAsString());
-                        if(type.getLength()!=d.get("size").getAsInt()) throw new IllegalStateException("Resolved layout size differs from proposal");
+                        if((exact(d) && type.getLength()!=d.get("size").getAsInt()) || type.getLength()<d.get("size").getAsInt()) throw new IllegalStateException("Resolved layout size differs from proposal");
                     }
                     applyCpp(plan);
-                    if(preview) report.addProperty("unchanged",before.equals(state(plan)));
+                    if(preview) {
+                        var after=measure(plan);
+                        report.add("after_metrics",gson.toJsonTree(after));
+                        verifyTrial(baseline,after);
+                        report.addProperty("unchanged",before.equals(state(plan)));
+                    }
                     currentProgram.getOptions("PistonDecompiler").setString(args[1],encoded);
                     currentProgram.getOptions("PistonDecompiler").setString(args[1]+".state",gson.toJson(state(plan)));
                     success=true;

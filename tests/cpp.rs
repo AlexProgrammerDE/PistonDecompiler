@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 #[test]
 fn cpp_layout_validation_rejects_unrepresented_bases_and_wrong_slots() {
     let mut plan: TypePlan=serde_json::from_value(json!({"definitions":[
-        {"kind":"structure","name":"Base","size":8,"fields":[]},
+        {"kind":"structure","name":"Base","size":8,"extent":{"kind":"exact","artifact_id":"fixture","start_line":1,"end_line":1},"fields":[]},
         {"kind":"structure","name":"Derived","size":16,"fields":[{"name":"base","offset":0,"data_type":{"kind":"named","name":"Base"}}]}
     ],"cpp":{"classes":[{"name":"Derived","bases":[{"name":"Base","offset":0,"virtual_base":false}],"vptrs":[]}]}})).unwrap();
     plan.validate(8).unwrap();
@@ -221,7 +221,7 @@ async fn native_cpp_evidence_capture_and_saved_writeback() {
     let fields:Vec<_>=slots.iter().map(|s|json!({"name":format!("slot_{}",s["offset"]),"offset":s["offset"],"data_type":{"kind":"pointer","to":{"kind":"function","return_type":{"kind":"primitive","name":"i32"},"parameters":[{"kind":"pointer","to":{"kind":"primitive","name":"void"}}]}}})).collect();
     let mut plan = json!({"definitions":[{"kind":"structure","name":"ObservedVtable","size":slots.len()*8,"fields":fields}],"signatures":[],"cpp":{"classes":[],"locals":[],"vtables":[{"address":table["address"],"table_type":"ObservedVtable","targets":slots.iter().map(|s|s["target"].clone()).collect::<Vec<_>>()}]}});
     plan["definitions"].as_array_mut().unwrap().extend([
-        json!({"kind":"structure","name":"ObservedBase","size":16,"fields":[{"name":"vptr","offset":0,"data_type":{"kind":"pointer","to":{"kind":"named","name":"ObservedVtable"}}}]}),
+        json!({"kind":"structure","name":"ObservedBase","size":16,"extent":{"kind":"exact","artifact_id":"fixture","start_line":1,"end_line":1},"fields":[{"name":"vptr","offset":0,"data_type":{"kind":"pointer","to":{"kind":"named","name":"ObservedVtable"}}}]}),
         json!({"kind":"structure","name":"ObservedObject","size":32,"fields":[{"name":"left","offset":0,"data_type":{"kind":"named","name":"ObservedBase"}},{"name":"right","offset":16,"data_type":{"kind":"named","name":"ObservedBase"}}]}),
         json!({"kind":"enumeration","name":"ObservedState","size":4,"values":{"Alive":1,"Dead":2}}),
     ]);

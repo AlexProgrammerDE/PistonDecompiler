@@ -35,7 +35,7 @@ fn compatible(plans: &[(String, TypePlan)]) -> HashSet<String> {
             let values: &mut Vec<(&String, &crate::types::Definition)> =
                 definitions.entry(definition.name()).or_default();
             for (other, value) in values.iter() {
-                if *value != definition {
+                if value.merged(definition).is_err() {
                     conflicts.insert((*other).clone());
                     conflicts.insert(id.clone());
                 }
@@ -199,7 +199,7 @@ async fn advance_locked(db: &Db, config: &Config, binary: &str, max_passes: u32)
                 set_phase(db, &id, "reanalysis", "").await?;
             }
             "reanalysis" => {
-                let functions: Vec<String> = sqlx::query_scalar("SELECT f.id FROM functions f JOIN results r ON r.id=f.current_result_id WHERE f.binary_id=? AND f.skip_reason='' AND (r.stale=1 OR r.name_review='deferred' OR r.summary_review='deferred' OR json_extract(r.automation_json,'$.types')='deferred' OR json_array_length(r.raw_json,'$.context_requests')>0) AND r.author<>'human' AND NOT EXISTS(SELECT 1 FROM review_decisions WHERE result_id=r.id) ORDER BY f.id")
+                let functions: Vec<String> = sqlx::query_scalar("SELECT f.id FROM functions f JOIN results r ON r.id=f.current_result_id WHERE f.binary_id=? AND f.skip_reason='' AND r.author<>'human' AND NOT EXISTS(SELECT 1 FROM review_decisions WHERE result_id=r.id) ORDER BY f.id")
                     .bind(binary).fetch_all(&db.pool).await?;
                 let mut prompts = Vec::new();
                 if pass + 1 < limit && config.ai.configured() {
@@ -295,6 +295,11 @@ async fn preview_types(
             .iter()
             .any(|reason| message.contains(reason))
             {
+                if message.contains("Native type trial rejected")
+                    || message.contains("Merged type plan violates")
+                {
+                    return isolate_type_conflicts(db, config, cycle, proposals).await;
+                }
                 return Err(error);
             }
         }
@@ -356,6 +361,62 @@ async fn type_outcome(db: &Db, result: &str, status: &str, reason: &str) -> Resu
     sqlx::query("UPDATE results SET automation_json=json_set(automation_json,'$.types',?,'$.reason',?) WHERE id=?")
         .bind(status).bind(reason).bind(result).execute(&db.pool).await?;
     Ok(())
+}
+
+/// Retain compatible work when one native proposal fails. Split rejected groups
+/// to avoid testing every result independently when most plans are compatible.
+async fn isolate_type_conflicts(
+    db: &Db,
+    config: &Config,
+    cycle: &str,
+    proposals: &mut Vec<String>,
+) -> Result<Option<Value>> {
+    let mut pending = std::collections::VecDeque::new();
+    let midpoint = proposals.len().div_ceil(2);
+    pending.push_back(proposals[..midpoint].to_vec());
+    if midpoint < proposals.len() {
+        pending.push_back(proposals[midpoint..].to_vec());
+    }
+    let mut accepted = Vec::new();
+    let mut last_preview = None;
+    while let Some(group) = pending.pop_front() {
+        let mut candidate = accepted.clone();
+        candidate.extend(group.iter().cloned());
+        match crate::types::preview_many(db, config, &candidate).await {
+            Ok(preview) => {
+                accepted = candidate;
+                last_preview = Some(preview);
+            }
+            Err(error) => {
+                let message = format!("{error:#}");
+                if !message.contains("Native type trial rejected")
+                    && !message.contains("Merged type plan violates")
+                {
+                    return Err(error);
+                }
+                if group.len() == 1 {
+                    type_outcome(
+                        db,
+                        &group[0],
+                        "deferred",
+                        &format!("Native trial retained other compatible changes: {message}"),
+                    )
+                    .await?;
+                } else {
+                    let midpoint = group.len().div_ceil(2);
+                    pending.push_front(group[midpoint..].to_vec());
+                    pending.push_front(group[..midpoint].to_vec());
+                }
+            }
+        }
+    }
+    *proposals = accepted;
+    sqlx::query("UPDATE automatic_recovery SET type_results=? WHERE id=?")
+        .bind(serde_json::to_string(proposals)?)
+        .bind(cycle)
+        .execute(&db.pool)
+        .await?;
+    Ok(last_preview)
 }
 
 async fn assess(db: &Db, binary: &str) -> Result<Vec<String>> {
@@ -726,6 +787,7 @@ mod tests {
     fn conflicting_types_defer_both_sources_but_keep_independent_plans() {
         let plan = |size| TypePlan {
             definitions: vec![crate::types::Definition::Structure {
+                extent: Default::default(),
                 name: "Record".into(),
                 size,
                 fields: vec![],

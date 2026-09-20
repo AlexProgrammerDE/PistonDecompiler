@@ -32,6 +32,18 @@ pub struct Field {
     pub offset: u32,
     pub data_type: TypeRef,
 }
+/// A materialized prefix is not evidence of the complete object's size.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LayoutExtent {
+    #[default]
+    Minimum,
+    Exact {
+        artifact_id: String,
+        start_line: u32,
+        end_line: u32,
+    },
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Definition {
@@ -40,6 +52,8 @@ pub enum Definition {
         #[schemars(range(min = 1))]
         size: u32,
         fields: Vec<Field>,
+        #[serde(default)]
+        extent: LayoutExtent,
     },
     Enumeration {
         name: String,
@@ -53,6 +67,67 @@ impl Definition {
         match self {
             Self::Structure { name, .. } | Self::Enumeration { name, .. } => name,
         }
+    }
+    /// Combine views of an existing named layout only when they share an identical field.
+    /// Names or matching offsets alone do not establish object identity.
+    pub fn merged(&self, other: &Self) -> Result<Self> {
+        if self == other {
+            return Ok(self.clone());
+        }
+        let (
+            Self::Structure {
+                name,
+                size,
+                fields,
+                extent,
+            },
+            Self::Structure {
+                name: other_name,
+                size: other_size,
+                fields: other_fields,
+                extent: other_extent,
+            },
+        ) = (self, other)
+        else {
+            anyhow::bail!("Conflicting type definitions");
+        };
+        ensure!(
+            name == other_name && fields.iter().any(|f| other_fields.contains(f)),
+            "Layouts have no shared field identity"
+        );
+        let merged_size = (*size).max(*other_size);
+        ensure!(
+            !matches!(extent, LayoutExtent::Exact { .. }) || *size == merged_size,
+            "New fields exceed the complete layout"
+        );
+        ensure!(
+            !matches!(other_extent, LayoutExtent::Exact { .. }) || *other_size == merged_size,
+            "Existing fields exceed the complete layout"
+        );
+        let mut merged_fields = fields.clone();
+        for field in other_fields {
+            if merged_fields.contains(field) {
+                continue;
+            }
+            ensure!(
+                !merged_fields
+                    .iter()
+                    .any(|old| old.name == field.name || old.offset == field.offset),
+                "Conflicting field interpretation"
+            );
+            merged_fields.push(field.clone());
+        }
+        merged_fields.sort_by_key(|field| field.offset);
+        Ok(Self::Structure {
+            name: name.clone(),
+            size: merged_size,
+            fields: merged_fields,
+            extent: if matches!(extent, LayoutExtent::Exact { .. }) {
+                extent.clone()
+            } else {
+                other_extent.clone()
+            },
+        })
     }
     pub fn size(&self) -> u32 {
         match self {
@@ -124,7 +199,23 @@ impl TypePlan {
         }
         for definition in &self.definitions {
             match definition {
-                Definition::Structure { name, size, fields } => {
+                Definition::Structure {
+                    name,
+                    size,
+                    fields,
+                    extent,
+                } => {
+                    if let LayoutExtent::Exact {
+                        artifact_id,
+                        start_line,
+                        end_line,
+                    } = extent
+                    {
+                        ensure!(
+                            !artifact_id.is_empty() && *start_line > 0 && end_line >= start_line,
+                            "Complete layouts require linked binary size evidence"
+                        );
+                    }
                     ensure!(fields.len() <= 512, "Too many fields");
                     let mut occupied = Vec::new();
                     let mut names = HashSet::new();
@@ -242,7 +333,11 @@ pub(crate) fn type_size<'a>(
                 .with_context(|| format!("Unresolved named type {name}"))?;
             ensure!(!stack.contains(&name.as_str()), "By-value type cycle");
             stack.push(name);
-            if let Definition::Structure { fields, .. } = definition {
+            if let Definition::Structure { fields, extent, .. } = definition {
+                ensure!(
+                    !matches!(extent, LayoutExtent::Minimum),
+                    "A partial layout cannot be embedded, returned by value, or used as an array stride"
+                );
                 for field in fields {
                     type_size(&field.data_type, defs, pointer, stack, depth + 1)?;
                 }
@@ -252,6 +347,7 @@ pub(crate) fn type_size<'a>(
         }
         TypeRef::Pointer { to } => {
             validate_reference(to, defs, depth + 1)?;
+            validate_sized_reference(to, defs, pointer, depth + 1)?;
             pointer
         }
         TypeRef::Array { element, count } => {
@@ -262,6 +358,32 @@ pub(crate) fn type_size<'a>(
         }
     })
 }
+fn validate_sized_reference(
+    ty: &TypeRef,
+    defs: &HashMap<&str, &Definition>,
+    pointer: u32,
+    depth: usize,
+) -> Result<()> {
+    ensure!(depth < 32, "Type nesting exceeds 32 levels");
+    match ty {
+        TypeRef::Pointer { to } => validate_sized_reference(to, defs, pointer, depth + 1)?,
+        TypeRef::Array { .. } => {
+            type_size(ty, defs, pointer, &mut vec![], depth + 1)?;
+        }
+        TypeRef::Function {
+            return_type,
+            parameters,
+        } => {
+            type_size(return_type, defs, pointer, &mut vec![], depth + 1)?;
+            for parameter in parameters {
+                type_size(parameter, defs, pointer, &mut vec![], depth + 1)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn validate_reference(ty: &TypeRef, defs: &HashMap<&str, &Definition>, depth: usize) -> Result<()> {
     ensure!(depth < 32, "Type nesting exceeds 32 levels");
     match ty {
@@ -346,13 +468,11 @@ pub async fn preview_many(
             .unwrap_or(analysis.type_plan);
         cpp.merge(plan.cpp)?;
         for definition in plan.definitions {
-            if let Some(old) = definitions.insert(definition.name().to_owned(), definition.clone())
-            {
-                ensure!(
-                    old == definition,
-                    "Conflicting type definitions cannot be merged"
-                );
-            }
+            let merged = match definitions.get(definition.name()) {
+                Some(old) => Definition::merged(old, &definition)?,
+                None => definition,
+            };
+            definitions.insert(merged.name().to_owned(), merged);
         }
         for signature in plan.signatures {
             if let Some(old) = signatures.insert(signature.address.clone(), signature.clone()) {
@@ -370,6 +490,10 @@ pub async fn preview_many(
     ensure!(
         !type_plan.is_empty(),
         "Results contain no structured type proposal"
+    );
+    ensure!(
+        type_plan.validate(8).is_ok() || type_plan.validate(4).is_ok(),
+        "Merged type plan violates layout constraints"
     );
     let id = crate::knowledge::id();
     let plan = serde_json::to_string(&type_plan)?;
@@ -403,6 +527,13 @@ pub async fn preview_many(
                 folder.join("ghidra/headless.log").display()
             )
         })?)?;
+    ensure!(
+        preview["status"] == "validated",
+        "Native type trial rejected: {}",
+        preview["error"]
+            .as_str()
+            .unwrap_or("missing validation result")
+    );
     let pointer = preview["expected"]["pointer_width"]
         .as_u64()
         .context("Missing Ghidra pointer width")?;
@@ -509,3 +640,6 @@ pub async fn apply(db: &crate::db::Db, config: &crate::config::Config, id: &str)
         }
     }
 }
+
+#[cfg(test)]
+mod native_tests;

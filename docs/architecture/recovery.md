@@ -20,7 +20,7 @@ Names alone do not satisfy this goal. Recovery includes structures, fields, clas
 11. Re-decompile affected functions and their callers.
 12. Repeat affected recursive components until facts stabilize or the iteration budget expires.
 
-Model confidence is not proof. Unsupported proposals remain unresolved, with their evidence and contradictions available for review.
+Model confidence is not proof. Unsupported proposals remain unresolved, with their evidence and contradictions retained for automatic refinement.
 Jev assessments supplement structural validation. They do not establish field meanings or silently override human corrections.
 
 ## Evidence model
@@ -51,3 +51,5 @@ The collector runs beside the target process. Ghidra and the model do not execut
 The model receives bounded evidence, not unrestricted process access.
 Imported trace data and binary strings are untrusted inputs.
 Each model iteration retains native provider receipts. The scheduler has no local dollar limit.
+
+Shared object context, partial layout rules, and native trials are described in [Shared object recovery](shared-object-recovery.md).
