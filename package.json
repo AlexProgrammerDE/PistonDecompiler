@@ -1,4 +1,4 @@
 {
-  "name": "piston-decompiler", "private": true, "packageManager": "bun@1.4.0",
+  "name": "piston-decompiler", "private": true, "packageManager": "bun@1.4.2",
   "scripts": { "dev": "bun run --cwd web dev", "build": "bun run --cwd web build && cargo build --release", "check": "cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && bun run --cwd web check" }
 }
