@@ -79,6 +79,7 @@ pub async fn dispatch(
         [
             "PistonExport.java",
             "PistonTypes.java",
+            "PistonParameters.java",
             "PistonApply.java",
             "PistonRuntime.java"
         ]
@@ -237,6 +238,7 @@ pub async fn open(config: &Config, binary: &str) -> Result<()> {
             scripts.join("PistonExport.java"),
             scripts.join("PistonApply.java"),
             scripts.join("PistonTypes.java"),
+            scripts.join("PistonParameters.java"),
             scripts.join("PistonRuntime.java"),
         ])
         .output()

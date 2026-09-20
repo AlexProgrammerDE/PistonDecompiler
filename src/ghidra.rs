@@ -69,6 +69,11 @@ pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
         include_str!("../ghidra/PistonRuntime.java"),
     )
     .await?;
+    tokio::fs::write(
+        dir.join("PistonParameters.java"),
+        include_str!("../ghidra/PistonParameters.java"),
+    )
+    .await?;
     Ok(tokio::fs::canonicalize(dir).await?)
 }
 async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {

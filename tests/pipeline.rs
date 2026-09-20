@@ -31,6 +31,7 @@ fn completion() -> Completion {
             claims: vec![],
             evidence: vec!["One integer addition".into()],
             parameter_types: vec![],
+            parameter_candidates: vec![],
             side_effects: vec![],
             uncertainties: vec![],
             type_plan: Default::default(),

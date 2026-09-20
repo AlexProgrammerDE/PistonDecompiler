@@ -75,3 +75,7 @@ They do not create a manual proposal-review queue or fabricate provider costs.
 
 The progress report shows the active phase and pass count.
 The pass limit is not an ETA. Timing remains unavailable when no reliable estimate exists.
+
+## Parameter experiments
+
+After type writeback, automatic recovery tests AI parameter candidates and direct call constraints in an isolated native program. Names and types are tested independently, including candidates omitted from the accepted signature plan. Winners are saved, audited, and included in the next export. See [automatic parameter experiments](parameter-experiments.md) for selection rules and limits.

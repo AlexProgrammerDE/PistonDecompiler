@@ -109,6 +109,7 @@ async fn batch_submit_and_partial_collection_preserve_jobs_and_unknown_costs() {
         }],
         evidence: vec!["The return statement contains a constant.".into()],
         parameter_types: vec![],
+        parameter_candidates: vec![],
         side_effects: vec![],
         uncertainties: vec![],
         type_plan: Default::default(),

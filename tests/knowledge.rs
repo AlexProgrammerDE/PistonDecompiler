@@ -29,6 +29,7 @@ fn completion() -> Completion {
             evidence: vec!["addition".into()],
             claims: vec![],
             parameter_types: vec![],
+            parameter_candidates: vec![],
             side_effects: vec![],
             uncertainties: vec![],
             type_plan: Default::default(),

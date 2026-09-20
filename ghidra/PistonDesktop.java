@@ -110,6 +110,7 @@ public class PistonDesktop implements GhidraLaunchable {
                     case "PistonRuntime.java" -> new PistonRuntime();
                     case "PistonExport.java" -> new PistonExport();
                     case "PistonTypes.java" -> new PistonTypes();
+                    case "PistonParameters.java" -> new PistonParameters();
                     case "PistonApply.java" -> new PistonApply();
                     default -> throw new IllegalArgumentException("Unsupported Piston operation");
                 };
@@ -124,7 +125,7 @@ public class PistonDesktop implements GhidraLaunchable {
                     success = true;
                 } finally { program.endTransaction(transaction, success); }
                 // Saving also persists the operation's reconciliation marker before acknowledging it.
-                if (name.equals("PistonRuntime.java") || name.equals("PistonApply.java") || (name.equals("PistonTypes.java") && args[0].equals("apply"))) {
+                if (name.equals("PistonParameters.java") || name.equals("PistonRuntime.java") || name.equals("PistonApply.java") || (name.equals("PistonTypes.java") && args[0].equals("apply"))) {
                     Swing.runNow(() -> tool.prepareToSave(program));
                     while (!program.lock("Save Piston changes")) {
                         monitor.checkCancelled();
@@ -134,6 +135,7 @@ public class PistonDesktop implements GhidraLaunchable {
                         program.save("Piston operation", monitor);
                         if(script instanceof PistonRuntime runtime) runtime.verifyApplied();
                         if(script instanceof PistonTypes types) types.verifyApplied();
+                        if(script instanceof PistonParameters parameters) parameters.verifyApplied();
                         if(script instanceof PistonApply names) names.verifyApplied();
                     }
                     finally { program.unlock(); }

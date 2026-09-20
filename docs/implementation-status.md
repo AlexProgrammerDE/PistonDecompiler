@@ -43,6 +43,7 @@ The system preserves unresolved facts rather than manufacturing these layouts.
 
 Runtime session management and recorded-function analysis have web controls.
 The server applies supported fields and runs bounded reanalysis automatically. The CLI uses the same durable recovery phases.
+Parameter candidates now receive isolated native trials after type writeback. AI names and types are tested independently, and direct-call constraints supply additional candidates. See [parameter experiments](architecture/parameter-experiments.md).
 Uncertain fields are deferred without manual review. Provider errors and unreconciled writeback failures remain explicit operational failures.
 
 ## Validation

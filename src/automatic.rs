@@ -181,12 +181,15 @@ async fn advance_locked(db: &Db, config: &Config, binary: &str, max_passes: u32)
                 set_phase(db, &id, "refreshing", "").await?;
             }
             "refreshing" => {
+                let parameters_changed = if config.ghidra_home.is_some() {
+                    crate::parameters::recover(db, config, binary, &id, pass).await?
+                } else { false };
                 // Type apply already exports; name-only changes also need fresh pseudocode.
                 let name_changed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM apply_items WHERE operation_id=? AND status='applied')")
                     .bind(cycle.get::<Option<String>, _>("name_operation")).fetch_one(&db.pool).await?;
                 let types_refreshed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM type_operations WHERE id=? AND status='applied')")
                     .bind(cycle.get::<Option<String>, _>("type_operation")).fetch_one(&db.pool).await?;
-                if name_changed && !types_refreshed {
+                if parameters_changed || (name_changed && !types_refreshed) {
                     ghidra::refresh(db, config, binary).await?;
                 }
                 sqlx::query("UPDATE results SET automation_json=json_set(automation_json,'$.name',CASE WHEN name_review='accepted' THEN 'applied' ELSE name_review END,'$.summary',CASE WHEN summary_review='accepted' THEN 'applied' ELSE summary_review END) WHERE id IN (SELECT result_id FROM apply_items WHERE operation_id=? AND status='applied')")
