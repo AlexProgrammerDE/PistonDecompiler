@@ -12,6 +12,10 @@ const SYSTEM: &str = "Analyze only supplied binary/decompiler/runtime artifacts.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Analysis {
+    #[schemars(
+        length(min = 1, max = 160),
+        regex(pattern = "^[A-Za-z_][A-Za-z0-9_]*$")
+    )]
     pub proposed_name: String,
     pub summary: String,
     pub confidence: f64,
@@ -729,6 +733,30 @@ impl Ai {
             };
             let mut analysis: Analysis = serde_json::from_str(&text)
                 .context("Analysis validation failed: invalid structured JSON")?;
+            if analysis.proposed_name.is_empty() {
+                let context: Value = serde_json::from_str(
+                    prompt.messages[1]["content"]
+                        .as_str()
+                        .context("Missing function context")?,
+                )?;
+                let current: Option<String> = sqlx::query_scalar(
+                    "SELECT name FROM functions WHERE binary_id=? AND address=?",
+                )
+                .bind(binary)
+                .bind(
+                    context["address"]
+                        .as_str()
+                        .context("Missing function address")?,
+                )
+                .fetch_optional(&db.pool)
+                .await?;
+                if let Some(name) = current.filter(|name| crate::types::identifier(name)) {
+                    analysis.proposed_name = name;
+                    analysis.uncertainties.push(
+                        "Provider omitted a function name; retained the existing symbol".into(),
+                    );
+                }
+            }
             // Repair unsupported structured proposals locally without paying to regenerate
             // otherwise useful behavior. Keep the provider response in the receipt.
             if analysis.type_plan.validate(8).is_err() && analysis.type_plan.validate(4).is_err() {

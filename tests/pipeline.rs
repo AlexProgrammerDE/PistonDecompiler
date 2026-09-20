@@ -433,3 +433,40 @@ async fn citation_schema_tracks_the_supplied_artifacts() {
         prompt.evidence.pop();
     }
 }
+
+#[tokio::test]
+async fn omitted_provider_name_retains_the_current_symbol_without_another_request() {
+    use axum::{Json, Router, routing::post};
+    let (_dir, db, _) = fixture().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let model = |Json(body): Json<serde_json::Value>| async move {
+        let context: serde_json::Value =
+            serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+        let mut value = serde_json::to_value(completion().analysis).unwrap();
+        value["proposed_name"] = json!("");
+        value["claims"] = json!([{"text":"Adds a constant.","references":[{"artifact_id":context["evidence"][0]["artifact_id"],"start_line":1,"end_line":1}]}]);
+        Json(
+            json!({"id":"fixture","choices":[{"message":{"content":value.to_string()}}],"usage":{"prompt_tokens":10,"completion_tokens":10}}),
+        )
+    };
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route("/chat/completions", post(model)),
+        )
+        .await
+        .unwrap()
+    });
+    let ai = Ai::new(AiConfig {
+        base_url: endpoint,
+        model: "fixture".into(),
+        api_key_env: "USER".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    let result = ai.analyze(&db, "b", "b:00000000", "map").await.unwrap();
+    assert_eq!(result.analysis.proposed_name, "fn_0");
+    result.analysis.validate().unwrap();
+    server.abort();
+}
