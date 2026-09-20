@@ -352,3 +352,71 @@ async fn callers_wait_for_callee_verification_but_recursive_members_do_not_deadl
         .unwrap();
     assert_eq!(caller.function_id, "b:00000001");
 }
+
+#[tokio::test]
+async fn validation_retry_adds_feedback_without_replacing_pinned_evidence() {
+    use axum::{Json, Router, routing::post};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let (_dir, db, mut ai) = fixture().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let app=Router::new().route("/chat/completions",post(move |Json(body):Json<serde_json::Value>| {
+        let index=seen.fetch_add(1,Ordering::SeqCst);
+        async move {
+            let messages=body["messages"].as_array().unwrap();
+            assert_eq!(messages.len(),if index==0 {2} else {3});
+            let context:serde_json::Value=serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+            let mut analysis=completion().analysis;
+            analysis.claims=vec![piston_decompiler::ai::Claim{text:"Adds a constant.".into(),references:vec![piston_decompiler::ai::EvidenceReference{artifact_id:context["evidence"][0]["artifact_id"].as_str().unwrap().into(),start_line:1,end_line:1}]}];
+            if index==0 {
+                analysis.type_plan.signatures.push(piston_decompiler::types::Signature {
+                    address:context["address"].as_str().unwrap().into(),name:analysis.proposed_name.clone(),namespace:vec![],
+                    return_type:piston_decompiler::types::TypeRef::Pointer{to:Box::new(piston_decompiler::types::TypeRef::Named{name:"undefined_layout".into()})},
+                    parameters:vec![],calling_convention:String::new(),variadic:false,
+                });
+            }
+            Json(json!({"model":"fixture","choices":[{"message":{"role":"assistant","content":serde_json::to_string(&analysis).unwrap()}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"cost":0.001}}))
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    ai.config.base_url = format!("http://{}", listener.local_addr().unwrap());
+    ai.config.api_key_env = "USER".into();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let job = pipeline::claim(&db, &ai, Some("b"), false)
+        .await
+        .unwrap()
+        .unwrap();
+    let error = ai.analyze_job(&db, &job).await.err().unwrap();
+    let pinned: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
+        .bind(&job.id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    pipeline::fail(&db, &ai, &job, &format!("{error:#}"))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE jobs SET available_at=0 WHERE id=?")
+        .bind(&job.id)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let retry = pipeline::claim(&db, &ai, Some("b"), false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retry.id, job.id);
+    let result = ai.analyze_job(&db, &retry).await.unwrap();
+    pipeline::finish(&db, &ai, &retry, result).await.unwrap();
+    let unchanged: String = sqlx::query_scalar("SELECT input_json FROM jobs WHERE id=?")
+        .bind(&job.id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(unchanged, pinned);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(db.overview("b").await.unwrap().cost_usd, Some(0.002));
+    server.abort();
+}

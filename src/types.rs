@@ -234,7 +234,9 @@ fn type_size<'a>(
             _ => anyhow::bail!("Unknown primitive {name}"),
         },
         TypeRef::Named { name } => {
-            let definition = defs.get(name.as_str()).context("Unresolved named type")?;
+            let definition = defs
+                .get(name.as_str())
+                .with_context(|| format!("Unresolved named type {name}"))?;
             ensure!(!stack.contains(&name.as_str()), "By-value type cycle");
             stack.push(name);
             if let Definition::Structure { fields, .. } = definition {
@@ -279,7 +281,7 @@ fn validate_reference(ty: &TypeRef, defs: &HashMap<&str, &Definition>, depth: us
         }
         TypeRef::Named { name } => ensure!(
             defs.contains_key(name.as_str()),
-            "Unresolved pointed-to type"
+            "Unresolved pointed-to type {name}"
         ),
         TypeRef::Pointer { to } => validate_reference(to, defs, depth + 1)?,
         TypeRef::Array { element, count } => {

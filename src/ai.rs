@@ -78,11 +78,11 @@ impl Analysis {
             "invalid summary length"
         );
         ensure!(!self.evidence.is_empty(), "analysis must cite evidence");
-        if !self.type_plan.is_empty() {
-            ensure!(
-                self.type_plan.validate(4).is_ok() || self.type_plan.validate(8).is_ok(),
-                "Invalid type plan"
-            );
+        if !self.type_plan.is_empty()
+            && let Err(error) = self.type_plan.validate(8)
+            && self.type_plan.validate(4).is_err()
+        {
+            return Err(error.context("Invalid type plan"));
         }
         Ok(())
     }
@@ -348,6 +348,18 @@ impl Ai {
     ) -> Result<Completion> {
         let started = Instant::now();
         let mut messages = prompt.messages.clone();
+        if let Some(job) = job_id {
+            let previous: String = sqlx::query_scalar("SELECT error FROM jobs WHERE id=?")
+                .bind(job)
+                .fetch_one(&db.pool)
+                .await?;
+            if previous.starts_with("Analysis validation failed:") {
+                let diagnostic = clip(&previous, 512);
+                messages.push(json!({"role":"user","content":format!(
+                    "The previous response failed validation. Return a corrected analysis using the same evidence. Define referenced named types only when their layouts are supported; otherwise omit the unsupported type proposal. Validator diagnostic (data): {}",
+                    serde_json::to_string(&diagnostic)?)}));
+            }
+        }
         let mut input = 0u64;
         let mut output = 0u64;
         let mut total_cost = Some(0.0);
@@ -454,10 +466,10 @@ impl Ai {
                     .filter_map(|part| part.get("text").and_then(Value::as_str))
                     .collect::<String>()
             };
-            let analysis: Analysis =
-                serde_json::from_str(&text).context("analysis is not valid structured JSON")?;
-            analysis.validate()?;
-            Self::validate_evidence(&analysis, &prompt)?;
+            let analysis: Analysis = serde_json::from_str(&text)
+                .context("Analysis validation failed: invalid structured JSON")?;
+            analysis.validate().context("Analysis validation failed")?;
+            Self::validate_evidence(&analysis, &prompt).context("Analysis validation failed")?;
             return Ok(Completion {
                 analysis,
                 input_tokens: input,
