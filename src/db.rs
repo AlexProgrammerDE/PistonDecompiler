@@ -25,6 +25,14 @@ impl Db {
         sqlx::migrate!().run(&pool).await?;
         let db = Self { pool };
         crate::knowledge::backfill(&db).await?;
+        let binaries: Vec<String> = sqlx::query_scalar("SELECT id FROM binaries")
+            .fetch_all(&db.pool)
+            .await?;
+        let mut tx = db.pool.begin().await?;
+        for binary in binaries {
+            crate::graph::rebuild(&mut tx, &binary).await?;
+        }
+        tx.commit().await?;
         Ok(db)
     }
     pub async fn event(&self, binary: &str, level: &str, message: &str) -> Result<()> {
@@ -42,7 +50,9 @@ impl Db {
         let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE jobs SET status='uncertain',error='Process stopped during a provider request. Reservation retained.',updated_at=unixepoch() WHERE status='running'").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET status='interrupted',error='Extraction was interrupted. Resume to extract again.' WHERE status='extracting'").execute(&mut *tx).await?;
+        sqlx::query("UPDATE type_operations SET status='uncertain',error='Process stopped during type writeback. Retry the exact operation.' WHERE status='applying'").execute(&mut *tx).await?;
         sqlx::query("UPDATE apply_operations SET status='uncertain',error='Process stopped during writeback. Retry this exact change set to reconcile.' WHERE status='applying'").execute(&mut *tx).await?;
+        sqlx::query("UPDATE recovery_iterations SET status='blocked',error='Recovery process stopped before this iteration finished.' WHERE status IN ('analyzing','applying')").execute(&mut *tx).await?;
         sqlx::query("UPDATE binaries SET paused=1 WHERE id IN (SELECT binary_id FROM jobs WHERE status='uncertain')").execute(&mut *tx).await?;
         tx.commit().await?;
         Ok(())
@@ -252,6 +262,7 @@ impl Db {
                 average_latency_ms: r.get("average_latency_ms"),
             })
             .collect();
+        overview.progress = crate::progress::reports(self, id).await?;
         Ok(overview)
     }
 }

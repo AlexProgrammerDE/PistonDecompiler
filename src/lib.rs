@@ -14,3 +14,13 @@ mod web_security;
 pub mod proto {
     tonic::include_proto!("piston.v1");
 }
+
+pub mod runtime;
+
+pub mod types;
+
+pub mod recovery;
+
+pub mod progress;
+
+pub mod desktop;

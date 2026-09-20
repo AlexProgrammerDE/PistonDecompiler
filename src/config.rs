@@ -11,6 +11,7 @@ pub struct Config {
     pub browser_origins: Vec<String>,
     pub ghidra_home: Option<PathBuf>,
     pub ghidra_timeout_secs: u64,
+    pub ghidra_gui: bool,
     pub ai: AiConfig,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -66,6 +67,7 @@ impl Default for Config {
             browser_origins: Vec::new(),
             ghidra_home: std::env::var_os("GHIDRA_HOME").map(Into::into),
             ghidra_timeout_secs: 7200,
+            ghidra_gui: false,
             ai: AiConfig::default(),
         }
     }
@@ -96,12 +98,29 @@ impl Default for AiConfig {
 }
 impl Config {
     pub fn load(path: &std::path::Path) -> Result<Self> {
-        let config: Self = if path.exists() {
+        let mut config: Self = if path.exists() {
             toml::from_str(&std::fs::read_to_string(path)?)
                 .context("invalid PistonDecompiler configuration")?
         } else {
             Self::default()
         };
+        if path.exists() {
+            let absolute = std::fs::canonicalize(path)?;
+            let base = absolute
+                .parent()
+                .context("Configuration has no parent directory")?;
+            if config.data_dir.is_relative() {
+                config.data_dir = base.join(&config.data_dir);
+            }
+            if config.web_dir.is_relative() {
+                config.web_dir = base.join(&config.web_dir);
+            }
+            if let Some(home) = &mut config.ghidra_home
+                && home.is_relative()
+            {
+                *home = base.join(&*home);
+            }
+        }
         let ai = &config.ai;
         ensure!(
             (1..=128).contains(&ai.concurrency),
@@ -210,5 +229,24 @@ impl AiConfig {
         } else {
             &self.model
         }
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    #[test]
+    fn config_relative_paths_stay_with_the_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("piston.toml");
+        std::fs::write(
+            &path,
+            "data_dir = 'data'\nweb_dir = 'web'\nghidra_home = 'ghidra'\n",
+        )
+        .unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.data_dir, dir.path().join("data"));
+        assert_eq!(config.web_dir, dir.path().join("web"));
+        assert_eq!(config.ghidra_home, Some(dir.path().join("ghidra")));
     }
 }

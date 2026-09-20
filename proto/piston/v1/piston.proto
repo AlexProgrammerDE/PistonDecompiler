@@ -39,7 +39,7 @@ message Overview {
   uint64 input_tokens = 9; uint64 output_tokens = 10; double cost_usd = 11;
   double reserved_usd = 12; double budget_usd = 13; uint32 edges = 14; uint32 modules = 15;
   repeated UsagePoint usage = 16; repeated Stage stages = 17; bool paused = 18;
-  repeated ProviderBreakdown provider_breakdowns = 19; string active_run_id = 20;
+  repeated ProviderBreakdown provider_breakdowns = 19; string active_run_id = 20; repeated ProgressReport progress = 21; string ghidra_desktop = 22;
 }
 message UsagePoint { string bucket = 1; uint64 input_tokens = 2; uint64 output_tokens = 3; double cost_usd = 4; uint32 requests = 5; }
 message Stage { string name = 1; uint32 queued = 2; uint32 completed = 3; uint32 failed = 4; uint32 running = 5; }
@@ -63,7 +63,7 @@ message FunctionDetail {
   string analysis_json = 7; string model = 8; string prompt_hash = 9;
   string disassembly = 10; string pcode = 11; AnalysisResult result = 12; repeated DecisionRecord decisions = 13;
 }
-message Job { string id = 1; string function_id = 2; string name = 3; string stage = 4; string status = 5; uint32 attempts = 6; string error = 7; int64 updated_at = 8; double reserved_usd = 9; }
+message Job { string id = 1; string function_id = 2; string name = 3; string stage = 4; string status = 5; uint32 attempts = 6; string error = 7; int64 updated_at = 8; double reserved_usd = 9; int64 started_at = 10; int64 finished_at = 11; }
 message JobList { repeated Job jobs = 1; }
 message Event { int64 id = 1; int64 created_at = 2; string level = 3; string message = 4; }
 message EventList { repeated Event events = 1; }
@@ -105,4 +105,10 @@ message DecisionRecord {
  string request_json = 5; string response_json = 6; string extraction_id = 7;
  string prompt_hash = 8; uint64 input_tokens = 9; uint64 output_tokens = 10;
  double cost_usd = 11; int64 created_at = 12;
+}
+
+message ProgressReport {
+ string phase = 1; string status = 2; uint32 completed = 3; uint32 total = 4;
+ int64 elapsed_seconds = 5; int64 eta_seconds = 6; string detail = 7;
+ int64 updated_at = 8;
 }

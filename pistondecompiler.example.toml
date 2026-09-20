@@ -6,6 +6,8 @@ web_dir = "web/dist"
 # browser_origins = ["http://localhost:3000"]
 # ghidra_home = "/opt/ghidra_12.1.3_PUBLIC"
 ghidra_timeout_secs = 7200
+# Open the native GUI after extraction and use it for later writeback.
+ghidra_gui = false
 
 [ai]
 # Use a chat-completions compatible provider. No model or price is assumed.

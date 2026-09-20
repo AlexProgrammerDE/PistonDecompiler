@@ -80,9 +80,10 @@ pub async fn snapshot(
         .fetch_all(&mut **tx)
         .await?;
     for function in &functions {
-        let r=sqlx::query("SELECT id,pseudocode,disassembly,pcode,strings_json,imports_json FROM functions WHERE id=?").bind(function).fetch_one(&mut **tx).await?;
+        let r=sqlx::query("SELECT id,pseudocode,disassembly,pcode,strings_json,imports_json,type_context FROM functions WHERE id=?").bind(function).fetch_one(&mut **tx).await?;
         for kind in [
             "pseudocode",
+            "type_context",
             "disassembly",
             "pcode",
             "strings_json",

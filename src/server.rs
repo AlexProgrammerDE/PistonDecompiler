@@ -91,12 +91,10 @@ impl PistonService for Service {
         &self,
         r: Request<proto::BinaryRequest>,
     ) -> Result<Response<proto::Overview>, Status> {
-        Ok(Response::new(
-            self.db
-                .overview(&r.into_inner().binary_id)
-                .await
-                .map_err(status)?,
-        ))
+        let binary = r.into_inner().binary_id;
+        let mut overview = self.db.overview(&binary).await.map_err(status)?;
+        overview.ghidra_desktop = crate::desktop::status(&self.config, &binary).await;
+        Ok(Response::new(overview))
     }
     async fn list_functions(
         &self,
@@ -131,6 +129,8 @@ impl PistonService for Service {
                     attempts: r.get::<i64, _>("attempts") as u32,
                     error: r.get("error"),
                     updated_at: r.get("updated_at"),
+                    started_at: r.get::<Option<i64>, _>("started_at").unwrap_or(0),
+                    finished_at: r.get::<Option<i64>, _>("finished_at").unwrap_or(0),
                     reserved_usd: r.get("reserved_usd"),
                 })
                 .collect(),
@@ -162,7 +162,7 @@ impl PistonService for Service {
         r: Request<proto::ControlRequest>,
     ) -> Result<Response<proto::Empty>, Status> {
         let r = r.into_inner();
-        if r.action == "extract" {
+        if r.action == "extract" || r.action == "open_ghidra" {
             self.db.binary(&r.binary_id).await.map_err(status)?;
             if self.config.ghidra_home.is_none() {
                 return Err(Status::failed_precondition("Configure GHIDRA_HOME first"));
@@ -170,16 +170,36 @@ impl PistonService for Service {
             let permit = self.ghidra_gate.clone().try_acquire_owned().map_err(|_| {
                 Status::resource_exhausted("Ghidra is processing another operation")
             })?;
+            if r.action == "open_ghidra" {
+                self.db
+                    .event(&r.binary_id, "info", "Opening the native Ghidra desktop.")
+                    .await
+                    .map_err(status)?;
+            }
             let service = self.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let result = ghidra::extract_cancellable(
-                    &service.db,
-                    &service.config,
-                    &r.binary_id,
-                    service.shutdown.clone(),
-                )
-                .await;
+                let result = if r.action == "open_ghidra" {
+                    crate::desktop::open(&service.config, &r.binary_id).await
+                } else {
+                    ghidra::extract_cancellable(
+                        &service.db,
+                        &service.config,
+                        &r.binary_id,
+                        service.shutdown.clone(),
+                    )
+                    .await
+                };
+                if result.is_ok() && r.action == "open_ghidra" {
+                    let _ = service
+                        .db
+                        .event(
+                            &r.binary_id,
+                            "info",
+                            "Native Ghidra desktop connected. Changes will use its open program.",
+                        )
+                        .await;
+                }
                 if let Err(error) = result {
                     let _ = service
                         .db

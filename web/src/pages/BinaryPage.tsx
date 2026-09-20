@@ -1,3 +1,4 @@
+import { ProgressReport } from "@/components/ProgressReport"
 import { InvestigationWorkbench } from "@/components/InvestigationWorkbench"
 import { ApplyChanges } from "@/components/ApplyChanges"
 import { LiveAnalysis, useLiveAnalysis } from "@/components/LiveAnalysis"
@@ -77,6 +78,7 @@ export function BinaryPage() {
             </h1>
             {b ? <Badge variant="outline">{b.status}</Badge> : null}
           </div>
+          <p>Ghidra desktop: {o?.ghidraDesktop || "Checking connection"}</p>
           <p aria-live="polite">
             {connected
               ? "Live updates connected"
@@ -98,6 +100,20 @@ export function BinaryPage() {
               Extract with Ghidra
             </Button>
           ) : null}
+          <Button
+            variant="outline"
+            disabled={
+              mutation.isPending ||
+              o?.ghidraDesktop === "starting" ||
+              !o?.functions ||
+              !settings.data?.ghidraConfigured
+            }
+            onClick={() => mutation.mutate("open_ghidra")}
+          >
+            {o?.ghidraDesktop === "connected"
+              ? "Show Ghidra"
+              : "Open in Ghidra"}
+          </Button>
           <Button
             variant="outline"
             disabled={
@@ -132,6 +148,7 @@ export function BinaryPage() {
           </Button>
         </div>
       ) : null}
+      <ProgressReport binaryId={binaryId} />
       <div className="summary-strip">
         <div>
           <span>Functions</span>
@@ -395,6 +412,7 @@ function Jobs({ binaryId }: { binaryId: string }) {
             <TableHead>Pass</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Attempts</TableHead>
+            <TableHead>Last attempt</TableHead>
             <TableHead>Details</TableHead>
           </TableRow>
         </TableHeader>
@@ -409,6 +427,11 @@ function Jobs({ binaryId }: { binaryId: string }) {
               <TableCell>{job.stage}</TableCell>
               <TableCell>{job.status}</TableCell>
               <TableCell>{job.attempts}</TableCell>
+              <TableCell>
+                {job.startedAt > 0n
+                  ? `${Math.max(0, Number((job.finishedAt || (job.status === "running" ? BigInt(Math.floor(query.dataUpdatedAt / 1000)) : job.updatedAt)) - job.startedAt))}s`
+                  : "No timing data"}
+              </TableCell>
               <TableCell className="max-w-lg whitespace-normal">
                 {job.error || `${money(job.reservedUsd)} reserved`}
               </TableCell>

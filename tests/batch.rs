@@ -113,6 +113,7 @@ async fn batch_submit_and_partial_collection_conserve_jobs_and_reservations() {
         parameter_types: vec![],
         side_effects: vec![],
         uncertainties: vec![],
+        type_plan: Default::default(),
     };
     *output.write().unwrap() = json!({
         "custom_id": jobs[0].get::<String, _>("id"),

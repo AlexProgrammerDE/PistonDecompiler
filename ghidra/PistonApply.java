@@ -8,6 +8,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 public class PistonApply extends GhidraScript {
+    public void verifyApplied() throws Exception {
+        JsonArray report=JsonParser.parseString(Files.readString(Path.of(getScriptArgs()[1]),StandardCharsets.UTF_8)).getAsJsonArray();
+        for(JsonElement element:report) {
+            JsonObject item=element.getAsJsonObject();
+            if(!item.get("status").getAsString().equals("applied")) continue;
+            var function=currentProgram.getFunctionManager().getFunctionAt(toAddr(item.get("address").getAsString()));
+            if(function==null || !function.getName().equals(item.get("name").getAsString()) || !Objects.toString(function.getComment(),"").equals(item.get("summary").getAsString()))
+                throw new IllegalStateException("Saved name or comment does not match the applied operation");
+        }
+    }
     @Override public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length != 2) throw new IllegalArgumentException("Expected change set and report paths");

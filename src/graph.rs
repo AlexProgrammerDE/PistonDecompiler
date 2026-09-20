@@ -75,6 +75,40 @@ pub fn modules(ids: &[String], edges: &[(String, String)]) -> HashMap<String, St
         .map(|(id, label)| (id.to_owned(), names[label].clone()))
         .collect()
 }
+/// Rebuild component identity after static import or observed edge changes.
+pub async fn rebuild(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    binary: &str,
+) -> anyhow::Result<()> {
+    let ids: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM functions WHERE binary_id=? ORDER BY id")
+            .bind(binary)
+            .fetch_all(&mut **tx)
+            .await?;
+    let edges: Vec<(String, String)> = sqlx::query_as(
+        "SELECT caller,callee FROM edges JOIN functions f ON f.id=caller WHERE f.binary_id=?",
+    )
+    .bind(binary)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut graph = DiGraph::<&str, ()>::new();
+    let nodes: HashMap<_, _> = ids
+        .iter()
+        .map(|id| (id.as_str(), graph.add_node(id.as_str())))
+        .collect();
+    for (caller, callee) in &edges {
+        graph.add_edge(nodes[caller.as_str()], nodes[callee.as_str()], ());
+    }
+    for component in kosaraju_scc(&graph) {
+        let key = component.iter().map(|n| graph[*n]).min().unwrap();
+        for node in component {
+            sqlx::query("INSERT INTO function_components(function_id,component_id) VALUES(?,?) ON CONFLICT(function_id) DO UPDATE SET component_id=excluded.component_id")
+                .bind(graph[node]).bind(key).execute(&mut **tx).await?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

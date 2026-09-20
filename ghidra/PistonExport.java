@@ -15,6 +15,8 @@ public class PistonExport extends GhidraScript {
         String[] args = getScriptArgs();
         if (args.length != 1) throw new IllegalArgumentException("Expected export path");
         Map<String,Object> metadata = new LinkedHashMap<>();
+        metadata.put("image_base", currentProgram.getImageBase().getOffset());
+        metadata.put("pointer_width", currentProgram.getDefaultPointerSize());
         metadata.put("ghidra_version", ghidra.framework.Application.getApplicationVersion());
         metadata.put("exporter_version", "pistondecompiler-export-v2");
         metadata.put("language", currentProgram.getLanguageID().toString());
@@ -26,11 +28,35 @@ public class PistonExport extends GhidraScript {
         Gson gson = new Gson();
         try (BufferedWriter out = Files.newBufferedWriter(Path.of(args[0]), StandardCharsets.UTF_8)) {
             FunctionIterator functions = currentProgram.getFunctionManager().getFunctions(true);
+            int completed = 0;
+            int total = currentProgram.getFunctionManager().getFunctionCount();
+            long lastProgress = 0;
+            Path progress = Path.of(args[0] + ".progress.json");
             while (functions.hasNext() && !monitor.isCancelled()) {
                 Function function = functions.next();
+                if (System.currentTimeMillis() - lastProgress >= 1000) {
+                    Path temporary = Path.of(progress + ".tmp");
+                    Files.writeString(temporary, gson.toJson(Map.of("completed", completed, "total", total, "function", function.getName())), StandardCharsets.UTF_8);
+                    Files.move(temporary, progress, StandardCopyOption.REPLACE_EXISTING);
+                    lastProgress = System.currentTimeMillis();
+                }
                 Map<String,Object> row = new LinkedHashMap<>();
                 row.put("address", function.getEntryPoint().toString());
                 row.put("name", function.getName());
+                Map<String,Object> typeContext=new LinkedHashMap<>();
+                typeContext.put("prototype",function.getPrototypeString(true,true));
+                typeContext.put("namespace",function.getParentNamespace().getName(true));
+                typeContext.put("calling_convention",function.getCallingConventionName());
+                typeContext.put("pointer_width",currentProgram.getDefaultPointerSize());
+                List<String> typeDescriptions=new ArrayList<>();
+                for(Parameter parameter:function.getParameters()) {
+                    var type=parameter.getDataType();
+                    for(int depth=0;depth<8 && type instanceof ghidra.program.model.data.Pointer;depth++) type=((ghidra.program.model.data.Pointer)type).getDataType();
+                    if(type!=null) typeDescriptions.add(type.toString());
+                }
+                typeContext.put("parameter_definitions",typeDescriptions);
+                typeContext.put("return_type",function.getReturnType().toString());
+                row.put("type_context",gson.toJson(typeContext));
                 row.put("comment", Objects.toString(function.getComment(), ""));
                 row.put("size", function.getBody().getNumAddresses());
                 row.put("thunk", function.isThunk());
@@ -63,6 +89,7 @@ public class PistonExport extends GhidraScript {
                 row.put("pcode", pcode.toString());
                 out.write(gson.toJson(row));
                 out.newLine();
+                completed++;
             }
             monitor.checkCancelled();
         } finally { decompiler.dispose(); }

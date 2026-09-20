@@ -22,11 +22,32 @@ pub enum RunState {
     Work,
     Waiting,
     BatchBlocked,
+    DependencyBlocked,
     Complete,
 }
 
+// A component can run only after downstream components finish every stage.
+// Recursive members share a component and never block one another.
+const READY: &str = "(j.stage <> 'propagate' OR NOT EXISTS (SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched','uncertain'))) AND NOT EXISTS (
+ WITH RECURSIVE downstream(component_id) AS (
+ SELECT target.component_id FROM function_components source
+ JOIN function_components member ON member.component_id=source.component_id
+ JOIN edges e ON e.caller=member.function_id
+ JOIN function_components target ON target.function_id=e.callee
+ WHERE source.function_id=j.function_id AND target.component_id<>source.component_id
+ UNION
+ SELECT target.component_id FROM downstream d
+ JOIN function_components member ON member.component_id=d.component_id
+ JOIN edges e ON e.caller=member.function_id
+ JOIN function_components target ON target.function_id=e.callee
+ )
+ SELECT 1 FROM downstream d JOIN function_components member ON member.component_id=d.component_id
+ JOIN jobs dependency ON dependency.function_id=member.function_id
+ WHERE dependency.run_id=j.run_id AND dependency.status IN ('queued','running','batched','uncertain')
+)";
+
 pub async fn run_state(db: &Db, binary: &str) -> Result<RunState> {
-    let row = sqlx::query("SELECT COUNT(CASE WHEN j.status='running' THEN 1 END) active,COUNT(CASE WHEN j.status='batched' THEN 1 END) batched,COUNT(CASE WHEN j.status='queued' THEN 1 END) queued,COUNT(CASE WHEN j.status='queued' AND j.available_at<=unixepoch() AND (j.stage IN ('map','preprocess','verify_map','verify_escalate') OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) THEN 1 END) claimable FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.binary_id=? AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id)")
+    let row = sqlx::query(&format!("SELECT COUNT(CASE WHEN j.status='uncertain' THEN 1 END) uncertain,COUNT(CASE WHEN j.status='running' THEN 1 END) active,COUNT(CASE WHEN j.status='batched' THEN 1 END) batched,COUNT(CASE WHEN j.status='queued' THEN 1 END) queued,COUNT(CASE WHEN j.status='queued' AND j.available_at<=unixepoch() AND {READY} THEN 1 END) claimable FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.binary_id=? AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id)"))
         .bind(binary)
         .fetch_one(&db.pool)
         .await?;
@@ -38,6 +59,8 @@ pub async fn run_state(db: &Db, binary: &str) -> Result<RunState> {
         RunState::Work
     } else if batched > 0 {
         RunState::BatchBlocked
+    } else if row.get::<i64, _>("uncertain") > 0 {
+        RunState::DependencyBlocked
     } else if queued > 0 {
         RunState::Waiting
     } else {
@@ -61,7 +84,7 @@ async fn claim_inner(
     // One write statement claims a row. SQLite serializes competing writers.
     let mut tx = db.pool.begin().await?;
     let stage_filter = if batch { "AND j.stage='map'" } else { "" };
-    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch() WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND (j.stage IN ('map','preprocess','verify_map','verify_escalate') OR NOT EXISTS(SELECT 1 FROM jobs earlier WHERE earlier.binary_id=j.binary_id AND earlier.run_id=j.run_id AND earlier.stage='map' AND earlier.status IN ('queued','running','batched'))) ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts,reserved_usd"))
+    let row = sqlx::query_as::<_,Job>(&format!("UPDATE jobs SET status='running',attempts=attempts+1,updated_at=unixepoch() WHERE id=(SELECT j.id FROM jobs j JOIN binaries b ON b.id=j.binary_id WHERE j.status='queued' AND j.available_at<=unixepoch() AND b.paused=0 AND (b.active_run_id IS NULL OR j.run_id=b.active_run_id) AND (? IS NULL OR j.binary_id=?) {stage_filter} AND {READY} ORDER BY j.priority DESC,j.id LIMIT 1) RETURNING id,binary_id,function_id,stage,attempts,reserved_usd"))
         .bind(binary).bind(binary).fetch_optional(&mut *tx).await?;
     let Some(mut job) = row else {
         return Ok(None);
@@ -191,7 +214,7 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
             }
         }
     }
-    sqlx::query("UPDATE results SET extraction_id=?,stale=EXISTS(SELECT 1 FROM result_dependencies d JOIN results dependency ON dependency.id=d.dependency_id JOIN functions f ON f.id=dependency.function_id WHERE d.result_id=results.id AND (dependency.stale=1 OR f.current_result_id<>dependency.id OR dependency.summary_review='rejected')) WHERE id=?")
+    sqlx::query("UPDATE results SET extraction_id=?,stale=EXISTS(SELECT 1 FROM result_dependencies d JOIN results dependency ON dependency.id=d.dependency_id JOIN functions f ON f.id=dependency.function_id WHERE d.result_id=results.id AND (dependency.stale=1 OR f.current_result_id<>dependency.id OR dependency.summary_review='rejected') AND NOT EXISTS(SELECT 1 FROM recovery_iterations iteration JOIN jobs own ON own.run_id=iteration.run_id JOIN function_components c ON c.function_id=dependency.function_id WHERE own.id=results.job_id AND c.component_id=iteration.component_id)) WHERE id=?")
         .bind(input["extraction_id"].as_str().unwrap_or("")).bind(&result_id).execute(&mut *tx).await?;
     let old: Option<String> =
         sqlx::query_scalar("SELECT current_result_id FROM functions WHERE id=?")
@@ -206,7 +229,10 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
     };
     if !protected {
         if let Some(old) = old {
-            crate::knowledge::invalidate(&mut tx, &old).await?;
+            // Results within this recovery iteration share a fixed prior SCC snapshot.
+            // External corrections still use the unconditional invalidation path.
+            sqlx::query("WITH RECURSIVE affected(id) AS (SELECT result_id FROM result_dependencies WHERE dependency_id=? UNION SELECT d.result_id FROM result_dependencies d JOIN affected a ON d.dependency_id=a.id) UPDATE results SET stale=1 WHERE id IN (SELECT id FROM affected) AND NOT EXISTS(SELECT 1 FROM jobs own JOIN recovery_iterations iteration ON iteration.run_id=own.run_id JOIN jobs current ON current.run_id=iteration.run_id WHERE own.id=results.job_id AND current.id=?)")
+                .bind(&old).bind(&job.id).execute(&mut *tx).await?;
         }
         sqlx::query("UPDATE functions SET current_result_id=? WHERE id=?")
             .bind(&result_id)
@@ -224,7 +250,7 @@ pub async fn finish(db: &Db, _ai: &Ai, job: &Job, completion: Completion) -> Res
         && matches!(job.stage.as_str(), "map" | "escalate")
     {
         prompt.candidate = Some(serde_json::json!({"result_id":result_id,"revision":0,
-            "proposed_name":a.proposed_name,"summary":a.summary,"claims":a.claims,"parameter_types":a.parameter_types}));
+            "proposed_name":a.proposed_name,"summary":a.summary,"claims":a.claims,"parameter_types":a.parameter_types,"type_plan":a.type_plan}));
         crate::decisions::enqueue(
             &mut tx,
             job,

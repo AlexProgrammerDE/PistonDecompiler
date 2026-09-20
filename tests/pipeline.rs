@@ -35,6 +35,7 @@ fn completion() -> Completion {
             parameter_types: vec![],
             side_effects: vec![],
             uncertainties: vec![],
+            type_plan: Default::default(),
         },
         input_tokens: 100,
         output_tokens: 20,
@@ -47,6 +48,16 @@ fn completion() -> Completion {
 #[tokio::test]
 async fn concurrent_claims_are_unique_and_reservations_bound_spend() {
     let (_dir, db, ai) = fixture().await;
+    // This budget test exercises independent components. Chains are tested separately.
+    sqlx::query("DELETE FROM edges")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let mut tx = db.pool.begin().await.unwrap();
+    piston_decompiler::graph::rebuild(&mut tx, "b")
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
     let reservation = ai.reservation("map", false);
     sqlx::query("UPDATE binaries SET budget_usd=? WHERE id='b'")
         .bind(reservation * 3.1)
@@ -115,6 +126,10 @@ async fn restart_preserves_uncertain_spend_and_explicit_retry_accounts_for_it() 
         .unwrap()
         .unwrap();
     db.recover().await.unwrap();
+    assert_eq!(
+        pipeline::run_state(&db, "b").await.unwrap(),
+        pipeline::RunState::DependencyBlocked
+    );
     let recovered = db.overview("b").await.unwrap();
     assert!(recovered.paused);
     assert_eq!(recovered.failed, 1);
@@ -272,4 +287,53 @@ async fn run_state_reports_remote_batch_blockers_without_hanging() {
         pipeline::run_state(&db, "b").await.unwrap(),
         pipeline::RunState::Complete
     );
+}
+
+#[tokio::test]
+async fn callers_wait_for_callee_verification_but_recursive_members_do_not_deadlock() {
+    let (_dir, db, ai) = fixture().await;
+    let leaf = pipeline::claim(&db, &ai, None, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(leaf.function_id, "b:00000000");
+    assert!(
+        pipeline::claim(&db, &ai, None, false)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    pipeline::finish(&db, &ai, &leaf, completion())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO jobs(id,binary_id,function_id,stage) VALUES('verify','b','b:00000000','verify_map')").execute(&db.pool).await.unwrap();
+    let verify = pipeline::claim(&db, &ai, None, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(verify.id, "verify");
+    assert!(
+        pipeline::claim(&db, &ai, None, false)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    sqlx::query("UPDATE jobs SET status='completed' WHERE id='verify'")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO edges(caller,callee) VALUES('b:00000000','b:00000001')")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let mut tx = db.pool.begin().await.unwrap();
+    piston_decompiler::graph::rebuild(&mut tx, "b")
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let caller = pipeline::claim(&db, &ai, None, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(caller.function_id, "b:00000001");
 }

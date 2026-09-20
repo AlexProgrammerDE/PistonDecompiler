@@ -108,7 +108,7 @@ fn questions(stage: &str) -> Value {
         json!({
             "name":question("Assess only the candidate function name against the evidence.", criteria.clone()),
             "summary":question("Assess only the candidate summary and its behavioral claims against the evidence.", criteria.clone()),
-            "types":question("Assess candidate parameter types. Empty types contain no type claim and count as supported. Plausibility alone does not establish a type.", criteria)
+            "types":question("Assess candidate parameter types and structured type_plan layouts and signatures. Empty types contain no type claim and count as supported. Plausibility alone does not establish a type.", criteria)
         })
     }
 }

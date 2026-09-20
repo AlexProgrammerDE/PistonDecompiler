@@ -1,3 +1,4 @@
+import { ProgressReport } from "@/components/ProgressReport"
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { PlusIcon, ArrowRightIcon, FileCodeIcon } from "@phosphor-icons/react"
@@ -86,6 +87,7 @@ export function LibraryPage() {
                     <div className="mt-1 font-mono text-xs text-muted-foreground">
                       {binary.sha256.slice(0, 16)}
                     </div>
+                    <ProgressReport binaryId={binary.id} compact />
                   </TableCell>
                   <TableCell>
                     {binary.format} / {binary.architecture}

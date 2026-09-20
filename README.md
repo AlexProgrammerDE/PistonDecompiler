@@ -107,7 +107,8 @@ External functions and functions without exported code remain excluded from the 
 Provider batches cannot run with decision routing enabled.
 
 This integration covers static preprocessing, selective generation, and candidate assessment.
-Runtime trace ingestion, struct recovery, type writeback, and iterative re-decompilation remain future work.
+The CLI now supports runtime trace ingestion, structured type proposals, Ghidra type writeback, and bounded callee-first recovery.
+See the [recovery workflow](docs/how-to/recover-a-binary.md), [architecture](docs/architecture/recovery.md), and [implementation boundaries](docs/implementation-status.md).
 
 ## CLI
 

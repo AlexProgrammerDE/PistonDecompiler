@@ -28,6 +28,45 @@ struct Cli {
 enum Command {
     /// Serve the gRPC-Web API, web app and durable AI workers.
     Serve,
+    /// Open the native Ghidra desktop for an extracted binary.
+    OpenGhidra {
+        binary: String,
+    },
+    /// Run callee-first recovery with bounded type and decompilation iterations.
+    Recover {
+        binary: String,
+        #[arg(long, default_value_t = 3)]
+        iterations: u32,
+        #[arg(long)]
+        apply_types: bool,
+    },
+    /// Import normalized runtime observations while the binary is paused.
+    /// Preview a structured type proposal against the current Ghidra program.
+    PreviewTypes {
+        result: String,
+    },
+    /// Apply an exact type preview and refresh Ghidra evidence.
+    ApplyTypes {
+        operation: String,
+    },
+    /// Refresh decompilation from the existing Ghidra program.
+    Refresh {
+        binary: String,
+    },
+    ImportTrace {
+        binary: String,
+        path: PathBuf,
+    },
+    /// Report observed coverage and unresolved regions.
+    RecoveryStatus {
+        binary: String,
+    },
+    CapturePlan {
+        binary: String,
+    },
+    Coverage {
+        binary: String,
+    },
     /// Import a binary. Ghidra never executes the input program.
     Import {
         path: PathBuf,
@@ -140,6 +179,72 @@ async fn run(cli: Cli) -> Result<()> {
     db.recover().await?;
     let ai = Arc::new(Ai::new(config.ai.clone())?);
     match cli.command {
+        Command::OpenGhidra { binary } => {
+            piston_decompiler::desktop::open(&config, &binary).await?
+        }
+        Command::PreviewTypes { result } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &piston_decompiler::types::preview(&db, &config, &result).await?
+            )?
+        ),
+        Command::ApplyTypes { operation } => {
+            piston_decompiler::types::apply(&db, &config, &operation).await?
+        }
+        Command::Refresh { binary } => ghidra::refresh(&db, &config, &binary).await?,
+        Command::ImportTrace { binary, path } => println!(
+            "{}",
+            piston_decompiler::runtime::import(&db, &binary, &path).await?
+        ),
+        Command::RecoveryStatus { binary } => {
+            use sqlx::Row;
+            let rows =
+                sqlx::query("SELECT * FROM recovery_iterations WHERE binary_id=? ORDER BY rowid")
+                    .bind(&binary)
+                    .fetch_all(&db.pool)
+                    .await?;
+            let records:Vec<_>=rows.iter().map(|r|serde_json::json!({"id":r.get::<String,_>("id"),"component":r.get::<String,_>("component_id"),"iteration":r.get::<i64,_>("iteration"),"run_id":r.get::<String,_>("run_id"),"status":r.get::<String,_>("status"),"error":r.get::<String,_>("error")})).collect();
+            println!("{}", serde_json::to_string_pretty(&records)?);
+        }
+        Command::CapturePlan { binary } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &piston_decompiler::runtime::capture_plan(&db, &binary).await?
+            )?
+        ),
+        Command::Coverage { binary } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &piston_decompiler::runtime::coverage(&db, &binary).await?
+            )?
+        ),
+        Command::Recover {
+            binary,
+            iterations,
+            apply_types,
+        } => {
+            let recovery = piston_decompiler::recovery::run(
+                &db,
+                &config,
+                &ai,
+                &binary,
+                iterations,
+                apply_types,
+            );
+            tokio::pin!(recovery);
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    result = &mut recovery => { result?; break; }
+                    _ = ticker.tick() => {
+                        match piston_decompiler::progress::reports(&db, &binary).await {
+                            Ok(reports) => tracing::info!(progress=%serde_json::to_string(&reports)?, "Recovery progress"),
+                            Err(error) => tracing::warn!(%error, "Cannot read recovery progress"),
+                        }
+                    }
+                }
+            }
+        }
         Command::Serve => {
             server::serve(Service {
                 db,
@@ -225,6 +330,12 @@ async fn run(cli: Cli) -> Result<()> {
                     pipeline::RunState::BatchBlocked => {
                         eprintln!(
                             "Local analysis is waiting for an asynchronous provider batch. Run `pistondecompiler batch list`, then collect the completed batch."
+                        );
+                        break;
+                    }
+                    pipeline::RunState::DependencyBlocked => {
+                        eprintln!(
+                            "Analysis is blocked by uncertain callee requests. Inspect their accounting before retrying."
                         );
                         break;
                     }

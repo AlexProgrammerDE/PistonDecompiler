@@ -19,6 +19,7 @@ pub struct ExportFunction {
     pub name: String,
     pub size: i64,
     pub comment: String,
+    pub type_context: String,
     pub pseudocode: String,
     pub disassembly: String,
     pub pcode: String,
@@ -39,6 +40,11 @@ pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
     tokio::fs::write(
         dir.join("PistonApply.java"),
         include_str!("../ghidra/PistonApply.java"),
+    )
+    .await?;
+    tokio::fs::write(
+        dir.join("PistonTypes.java"),
+        include_str!("../ghidra/PistonTypes.java"),
     )
     .await?;
     Ok(tokio::fs::canonicalize(dir).await?)
@@ -66,12 +72,21 @@ async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
     let _ = child.kill().await;
     let _ = child.wait().await;
 }
-async fn headless(
+pub(crate) async fn headless(
     config: &Config,
     binary: &str,
     args: &[String],
     cancel: Option<CancellationToken>,
 ) -> Result<()> {
+    if config.ghidra_gui
+        && args.iter().any(|arg| arg == "-process")
+        && crate::desktop::status(config, binary).await != "connected"
+    {
+        crate::desktop::open(config, binary).await?;
+    }
+    if crate::desktop::dispatch(config, binary, args, cancel.clone()).await? {
+        return Ok(());
+    }
     let home = config
         .ghidra_home
         .as_ref()
@@ -162,21 +177,35 @@ async fn extract_inner(
     let output = tokio::fs::canonicalize(config.data_dir.join("binaries").join(binary))
         .await?
         .join("functions.jsonl");
+    sqlx::query("INSERT INTO extraction_progress(binary_id,phase) VALUES (?,'Ghidra startup and analysis') ON CONFLICT(binary_id) DO UPDATE SET phase=excluded.phase,completed=0,total=0,started_at=unixepoch(),phase_started_at=unixepoch(),updated_at=unixepoch(),detail='' ").bind(binary).execute(&db.pool).await?;
+    let progress_path = PathBuf::from(format!("{}.progress.json", output.display()));
+    if progress_path.exists() {
+        tokio::fs::remove_file(&progress_path).await?;
+    }
     let result = async {
-        headless(
-            config,
-            binary,
-            &[
-                "-import".into(),
-                row.get("path"),
-                "-overwrite".into(),
-                "-postScript".into(),
-                "PistonExport.java".into(),
-                output.to_string_lossy().into_owned(),
-            ],
-            cancel,
-        )
-        .await?;
+        let project=config.data_dir.join("binaries").join(binary).join("ghidra/piston.gpr");
+        let mut args=if project.exists() {
+            vec!["-process".into(),"program.bin".into()]
+        } else {
+            vec!["-import".into(),row.get("path")]
+        };
+        args.extend(["-postScript".into(),"PistonExport.java".into(),output.to_string_lossy().into_owned()]);
+        let mut extraction_config=config.clone();
+        extraction_config.ghidra_gui=false;
+        let operation = headless(&extraction_config, binary, &args, cancel);
+        tokio::pin!(operation);
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                result = &mut operation => { result?; break; }
+                _ = ticker.tick() => {
+                    if let Err(error) = extraction_tick(db,config,binary,&progress_path).await {
+                        tracing::warn!(%error,"Cannot update extraction progress");
+                    }
+                }
+            }
+        }
+        sqlx::query("UPDATE extraction_progress SET phase='Importing function index',completed=0,total=0,phase_started_at=unixepoch(),updated_at=unixepoch() WHERE binary_id=?").bind(binary).execute(&db.pool).await?;
         import_export(db, binary, &output).await
     }
     .await;
@@ -189,7 +218,77 @@ async fn extract_inner(
         db.event(binary, "error", &format!("Extraction failed: {error:#}"))
             .await?;
     }
+    if result.is_ok() {
+        sqlx::query("UPDATE extraction_progress SET completed=(SELECT COUNT(*) FROM functions WHERE binary_id=?),total=(SELECT COUNT(*) FROM functions WHERE binary_id=?) WHERE binary_id=?")
+            .bind(binary).bind(binary).bind(binary).execute(&db.pool).await?;
+    }
+    sqlx::query(
+        "UPDATE extraction_progress SET phase=?,updated_at=unixepoch(),detail=? WHERE binary_id=?",
+    )
+    .bind(if result.is_ok() {
+        "Extraction complete"
+    } else {
+        "Extraction failed"
+    })
+    .bind(
+        result
+            .as_ref()
+            .err()
+            .map(|e| format!("{e:#}"))
+            .unwrap_or_default(),
+    )
+    .bind(binary)
+    .execute(&db.pool)
+    .await?;
+    if result.is_ok()
+        && config.ghidra_gui
+        && let Err(error) = crate::desktop::open(config, binary).await
+    {
+        db.event(
+            binary,
+            "error",
+            &format!("Extraction completed, but the Ghidra desktop could not open: {error:#}"),
+        )
+        .await?;
+    }
     result
+}
+
+async fn extraction_tick(db: &Db, config: &Config, binary: &str, progress: &Path) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    if let Ok(content) = tokio::fs::read_to_string(progress).await {
+        let value: serde_json::Value = serde_json::from_str(&content)?;
+        sqlx::query("UPDATE extraction_progress SET phase_started_at=CASE WHEN phase!='Decompiling functions' THEN unixepoch() ELSE phase_started_at END,phase='Decompiling functions',completed=?,total=?,detail=?,updated_at=unixepoch() WHERE binary_id=?")
+            .bind(value["completed"].as_i64().unwrap_or(0)).bind(value["total"].as_i64().unwrap_or(0))
+            .bind(value["function"].as_str().unwrap_or("")).bind(binary).execute(&db.pool).await?;
+    } else {
+        let path = config
+            .data_dir
+            .join("binaries")
+            .join(binary)
+            .join("ghidra/headless.log");
+        if let Ok(mut file) = tokio::fs::File::open(path).await {
+            let length = file.metadata().await?.len();
+            file.seek(std::io::SeekFrom::Start(length.saturating_sub(4096)))
+                .await?;
+            let mut bytes = Vec::new();
+            file.take(4096).read_to_end(&mut bytes).await?;
+            let text = String::from_utf8_lossy(&bytes);
+            let detail = text
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("");
+            sqlx::query(
+                "UPDATE extraction_progress SET detail=?,updated_at=unixepoch() WHERE binary_id=?",
+            )
+            .bind(detail)
+            .bind(binary)
+            .execute(&db.pool)
+            .await?;
+        }
+    }
+    Ok(())
 }
 pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
     let mut lines = BufReader::new(tokio::fs::File::open(path).await?).lines();
@@ -243,6 +342,11 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
             .bind(&id)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("UPDATE functions SET type_context=? WHERE id=?")
+            .bind(&f.type_context)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
         for callee in f.callees {
             pending_edges.push((id.clone(), callee));
         }
@@ -277,6 +381,7 @@ pub async fn import_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
         sqlx::query("INSERT INTO jobs(id,binary_id,function_id,stage,priority) SELECT ?,?,id,'map',? FROM functions WHERE id=? AND skip_reason=''")
             .bind(uuid::Uuid::new_v4().to_string()).bind(binary).bind(-(ranks[id] as i64)).bind(id).execute(&mut *tx).await?;
     }
+    crate::graph::rebuild(&mut tx, binary).await?;
     crate::knowledge::snapshot(&mut tx, binary, &metadata).await?;
     sqlx::query("UPDATE binaries SET status='indexed',error='' WHERE id=?")
         .bind(binary)
@@ -302,7 +407,7 @@ pub async fn execute_apply(
     cancel: Option<CancellationToken>,
 ) -> Result<crate::proto::ApplyOperation> {
     let mut tx = db.pool.begin().await?;
-    let changed=sqlx::query("UPDATE apply_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain') AND NOT EXISTS(SELECT 1 FROM apply_operations other WHERE other.binary_id=apply_operations.binary_id AND other.id<>apply_operations.id AND other.status IN ('applying','uncertain'))").bind(operation_id).execute(&mut *tx).await?.rows_affected();
+    let changed=sqlx::query("UPDATE apply_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain') AND NOT EXISTS(SELECT 1 FROM apply_operations other WHERE other.binary_id=apply_operations.binary_id AND other.id<>apply_operations.id AND other.status IN ('applying','uncertain')) AND NOT EXISTS(SELECT 1 FROM type_operations t WHERE t.binary_id=apply_operations.binary_id AND t.status IN ('applying','uncertain'))").bind(operation_id).execute(&mut *tx).await?.rows_affected();
     ensure!(
         changed == 1,
         "Change set is already applied or another unresolved writer owns this binary"
@@ -403,4 +508,90 @@ mod tests {
             "headless child process survived cancellation"
         );
     }
+}
+
+/// Refresh an existing program without deleting results, reviews, or accounting.
+pub async fn refresh(db: &Db, config: &Config, binary: &str) -> Result<()> {
+    let folder = tokio::fs::canonicalize(config.data_dir.join("binaries").join(binary)).await?;
+    let output = folder.join(format!("refresh-{}.jsonl", crate::knowledge::id()));
+    headless(
+        config,
+        binary,
+        &[
+            "-process".into(),
+            "program.bin".into(),
+            "-noanalysis".into(),
+            "-postScript".into(),
+            "PistonExport.java".into(),
+            output.to_string_lossy().into_owned(),
+        ],
+        None,
+    )
+    .await?;
+    refresh_export(db, binary, &output).await
+}
+pub async fn refresh_export(db: &Db, binary: &str, path: &Path) -> Result<()> {
+    let mut lines = BufReader::new(tokio::fs::File::open(path).await?).lines();
+    let mut tx = db.pool.begin().await?;
+    let mut seen = HashSet::new();
+    while let Some(line) = lines.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let f: ExportFunction = serde_json::from_str(&line)?;
+        ensure!(
+            seen.insert(f.address.clone()),
+            "Duplicate function in refreshed extraction"
+        );
+        let id = format!("{binary}:{}", f.address);
+        let old: (String, String, Option<String>) = sqlx::query_as(
+            "SELECT pseudocode,type_context,current_result_id FROM functions WHERE id=?",
+        )
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if (old.0 != f.pseudocode || old.1 != f.type_context)
+            && let Some(result) = old.2
+        {
+            sqlx::query("UPDATE results SET stale=1 WHERE id=?")
+                .bind(&result)
+                .execute(&mut *tx)
+                .await?;
+            crate::knowledge::invalidate(&mut tx, &result).await?;
+        }
+        sqlx::query("UPDATE functions SET type_context=? WHERE id=?")
+            .bind(&f.type_context)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        let changed=sqlx::query("UPDATE functions SET name=?,comment=?,pseudocode=?,disassembly=?,pcode=?,fingerprint=? WHERE id=? AND binary_id=?")
+            .bind(&f.name).bind(&f.comment).bind(&f.pseudocode).bind(&f.disassembly).bind(&f.pcode).bind(hex::encode(Sha256::digest(f.pseudocode.as_bytes()))).bind(&id).bind(binary).execute(&mut *tx).await?.rows_affected();
+        ensure!(
+            changed == 1,
+            "Refreshed function not present in original extraction"
+        );
+        sqlx::query("UPDATE function_search SET name=?,pseudocode=? WHERE function_id=?")
+            .bind(&f.name)
+            .bind(&f.pseudocode)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        for address in f.callees {
+            sqlx::query("INSERT OR IGNORE INTO edges(caller,callee) SELECT ?,id FROM functions WHERE binary_id=? AND address=?").bind(&id).bind(binary).bind(address).execute(&mut *tx).await?;
+        }
+    }
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM functions WHERE binary_id=?")
+        .bind(binary)
+        .fetch_one(&mut *tx)
+        .await?;
+    ensure!(
+        seen.len() as i64 == count && count > 0,
+        "Refreshed extraction is incomplete"
+    );
+
+    let metadata = tokio::fs::read_to_string(path.with_extension("metadata.json")).await?;
+    crate::knowledge::snapshot(&mut tx, binary, &metadata).await?;
+    graph::rebuild(&mut tx, binary).await?;
+    tx.commit().await?;
+    Ok(())
 }

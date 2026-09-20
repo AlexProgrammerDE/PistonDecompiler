@@ -33,6 +33,7 @@ fn completion() -> Completion {
             parameter_types: vec![],
             side_effects: vec![],
             uncertainties: vec![],
+            type_plan: Default::default(),
         },
         input_tokens: 10,
         output_tokens: 10,
@@ -387,7 +388,7 @@ async fn original_database_migrates_without_losing_results() {
             .fetch_one(&db.pool)
             .await
             .unwrap(),
-        6
+        7
     );
 }
 
