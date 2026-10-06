@@ -32,6 +32,18 @@ enum Command {
     OpenGhidra {
         binary: String,
     },
+    /// Run the MCP server over stdio when the web server is stopped.
+    Mcp,
+    /// Run a bounded batch of live Ghidra queries from a JSON file.
+    QueryProgram {
+        binary: String,
+        path: PathBuf,
+    },
+    /// Run a private build-pinned native instruction fixture.
+    NativeTest {
+        binary: String,
+        path: PathBuf,
+    },
     /// Run callee-first recovery with bounded type and decompilation iterations.
     Recover {
         binary: String,
@@ -178,6 +190,46 @@ async fn run(cli: Cli) -> Result<()> {
     db.recover().await?;
     let ai = Arc::new(Ai::new(config.ai.clone())?);
     match cli.command {
+        Command::NativeTest { binary, path } => {
+            let cancel = CancellationToken::new();
+            let task = piston_decompiler::native::run(&db, &config, &binary, &path, cancel.clone());
+            tokio::pin!(task);
+            let result = tokio::select! {
+                result = &mut task => result,
+                _ = tokio::signal::ctrl_c() => { cancel.cancel(); task.await }
+            }?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Command::Mcp => {
+            use rmcp::ServiceExt;
+            let shutdown = CancellationToken::new();
+            let gate = Arc::new(tokio::sync::Semaphore::new(1));
+            let server = piston_decompiler::mcp::ResearchServer::new(Service {
+                db,
+                ai,
+                config,
+                ghidra_gate: gate.clone(),
+                shutdown: shutdown.clone(),
+            })
+            .serve(rmcp::transport::stdio())
+            .await?;
+            let outcome = server.waiting().await;
+            shutdown.cancel();
+            let _permit = gate.acquire().await?;
+            outcome?;
+        }
+        Command::QueryProgram { binary, path } => {
+            let queries = serde_json::from_slice(&tokio::fs::read(path).await?)?;
+            let cancel = CancellationToken::new();
+            let task =
+                piston_decompiler::research::query(&db, &config, &binary, queries, cancel.clone());
+            tokio::pin!(task);
+            let result = tokio::select! {
+                result = &mut task => result,
+                _ = tokio::signal::ctrl_c() => { cancel.cancel(); task.await }
+            }?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
         Command::OpenGhidra { binary } => {
             piston_decompiler::desktop::open(&config, &binary).await?
         }

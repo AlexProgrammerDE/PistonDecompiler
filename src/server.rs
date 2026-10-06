@@ -479,6 +479,7 @@ pub fn router(service: Service, addr: std::net::SocketAddr) -> Result<axum::Rout
     let grpc = tonic_web::GrpcWebLayer::new().layer(rpc);
     let router = tonic::service::Routes::new(grpc)
         .into_axum_router()
+        .nest_service("/mcp", crate::mcp::http(service.clone(), addr))
         .route(
             "/healthz",
             axum::routing::get(|| async { axum::http::StatusCode::NO_CONTENT }),

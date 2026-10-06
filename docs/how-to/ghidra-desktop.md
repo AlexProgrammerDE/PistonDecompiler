@@ -43,7 +43,8 @@ Review and accept any first-launch agreement in the native Ghidra window yoursel
 ## One program, one writer
 
 The desktop owns the Ghidra project while it is open.
-Piston sends only its export, validated-name, and structured-type operations to that process.
+Piston sends its export, runtime, parameter, type, focused-query and verified-annotation operations to that process.
+See [focused Ghidra research](focused-ghidra-research.md) for MCP access and batch queries.
 Changes run in Ghidra transactions and trigger its normal program change events.
 Write operations save the program before reporting success, including any existing unsaved program edits.
 Read operations do not save the program.

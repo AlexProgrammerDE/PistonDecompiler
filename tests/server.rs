@@ -133,3 +133,90 @@ async fn event_stream_replays_only_events_after_cursor() {
     cancel.cancel();
     task.abort();
 }
+
+#[tokio::test]
+async fn mcp_negotiates_tools_and_shares_the_writer_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&dir.path().join("mcp.db")).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let config = Arc::new(Config::default());
+    let gate = Arc::new(tokio::sync::Semaphore::new(1));
+    let service = Service {
+        db,
+        ai: Arc::new(Ai::new(config.ai.clone()).unwrap()),
+        config,
+        ghidra_gate: gate.clone(),
+        shutdown: CancellationToken::new(),
+    };
+    let router = server::router(service, address).unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let client = reqwest::Client::new();
+    let url = format!("http://{address}/mcp");
+    let initialize=client.post(&url).header("accept","application/json, text/event-stream").json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})).send().await.unwrap();
+    assert_eq!(initialize.status(), reqwest::StatusCode::OK);
+    let session = initialize.headers()["mcp-session-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    async fn post(
+        client: &reqwest::Client,
+        url: &str,
+        session: &str,
+        value: serde_json::Value,
+    ) -> serde_json::Value {
+        let text = client
+            .post(url)
+            .header("accept", "application/json, text/event-stream")
+            .header("mcp-session-id", session)
+            .header("mcp-protocol-version", "2025-11-25")
+            .json(&value)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let data = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .find(|data| !data.is_empty())
+            .unwrap_or(&text);
+        serde_json::from_str(data).unwrap()
+    }
+    client
+        .post(&url)
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session)
+        .json(&serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+        .send()
+        .await
+        .unwrap();
+    let tools = post(
+        &client,
+        &url,
+        &session,
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+    )
+    .await;
+    let tools = tools["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 7);
+    let query = tools
+        .iter()
+        .find(|tool| tool["name"] == "query_program")
+        .unwrap();
+    assert_eq!(query["annotations"]["readOnlyHint"], true);
+    let _permit = gate.acquire().await.unwrap();
+    let blocked=post(&client,&url,&session,serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_program","arguments":{"binary_id":"missing","queries":[{"kind":"function","address":"140000000"}]}}})).await;
+    assert!(blocked["error"].is_object(), "{blocked}");
+    let hostile = client
+        .post(&url)
+        .header("origin", "https://untrusted.example")
+        .header("accept", "application/json, text/event-stream")
+        .json(&serde_json::json!({"jsonrpc":"2.0","id":4,"method":"tools/list"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hostile.status(), reqwest::StatusCode::FORBIDDEN);
+    server.abort();
+}

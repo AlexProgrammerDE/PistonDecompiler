@@ -36,4 +36,7 @@ pub mod refinement;
 
 pub mod parameters;
 
+pub mod mcp;
+pub mod native;
 pub mod objects;
+pub mod research;

@@ -567,7 +567,7 @@ pub async fn apply(db: &crate::db::Db, config: &crate::config::Config, id: &str)
             ensure!(valid, "A source proposal changed since preview");
         }
     }
-    let busy:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM jobs WHERE binary_id=? AND status IN ('running','batched','uncertain'))+(SELECT COUNT(*) FROM apply_operations WHERE binary_id=? AND status IN ('applying','uncertain'))+(SELECT COUNT(*) FROM type_operations WHERE binary_id=? AND id<>? AND status IN ('applying','uncertain'))").bind(&binary).bind(&binary).bind(&binary).bind(id).fetch_one(&mut *tx).await?;
+    let busy:i64=sqlx::query_scalar("SELECT (SELECT COUNT(*) FROM jobs WHERE binary_id=? AND status IN ('running','batched','uncertain'))+(SELECT COUNT(*) FROM apply_operations WHERE binary_id=? AND status IN ('applying','uncertain'))+(SELECT COUNT(*) FROM type_operations WHERE binary_id=? AND id<>? AND status IN ('applying','uncertain'))+(SELECT COUNT(*) FROM research_operations WHERE binary_id=? AND status IN ('applying','uncertain'))").bind(&binary).bind(&binary).bind(&binary).bind(id).bind(&binary).fetch_one(&mut *tx).await?;
     ensure!(busy == 0, "Another operation owns this binary");
     let paused: bool =
         sqlx::query_scalar("SELECT paused OR recovery_writer FROM binaries WHERE id=?")

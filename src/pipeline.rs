@@ -280,15 +280,24 @@ pub async fn control(db: &Db, ai: &Ai, binary: &str, action: &str) -> Result<()>
     db.binary(binary).await?;
     match action {
         "resume" => {
+            let uncertain: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM research_operations WHERE binary_id=? AND status IN ('applying','uncertain'))").bind(binary).fetch_one(&db.pool).await?;
+            ensure!(
+                !uncertain,
+                "Reconcile the exact Ghidra research operation before resuming analysis"
+            );
             crate::decisions::prepare(db, ai, binary).await?;
             ensure!(
                 ai.config.configured(),
                 "Configure an AI model and API key first"
             );
-            sqlx::query("UPDATE binaries SET paused=0 WHERE id=?")
+            let resumed = sqlx::query("UPDATE binaries SET paused=0 WHERE id=? AND NOT EXISTS(SELECT 1 FROM research_operations WHERE binary_id=binaries.id AND status IN ('applying','uncertain'))")
                 .bind(binary)
                 .execute(&db.pool)
-                .await?;
+                .await?.rows_affected();
+            ensure!(
+                resumed == 1,
+                "A Ghidra research writer started before analysis resumed; reconcile it first"
+            );
         }
         "pause" => {
             sqlx::query("UPDATE binaries SET paused=1 WHERE id=?")

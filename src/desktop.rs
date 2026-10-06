@@ -81,7 +81,9 @@ pub async fn dispatch(
             "PistonTypes.java",
             "PistonParameters.java",
             "PistonApply.java",
-            "PistonRuntime.java"
+            "PistonRuntime.java",
+            "PistonQuery.java",
+            "PistonAnnotate.java"
         ]
         .contains(&name.as_str()),
         "Unsupported desktop script"
@@ -240,6 +242,8 @@ pub async fn open(config: &Config, binary: &str) -> Result<()> {
             scripts.join("PistonTypes.java"),
             scripts.join("PistonParameters.java"),
             scripts.join("PistonRuntime.java"),
+            scripts.join("PistonQuery.java"),
+            scripts.join("PistonAnnotate.java"),
         ])
         .output()
         .await

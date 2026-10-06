@@ -11,6 +11,8 @@ This documentation serves contributors who build and operate evidence-based bina
 - [Recovery workflow](how-to/recover-a-binary.md): capture observations and run bounded recovery.
 - [Type plan format](reference/type-plans.md): structures, signatures, and validation limits.
 - [Native Ghidra desktop](how-to/ghidra-desktop.md): open CodeBrowser and see applied changes.
+- [Focused Ghidra research](how-to/focused-ghidra-research.md): MCP queries, verified annotations and native comparisons.
+- [Native fixture format](reference/native-fixtures.md): build identity, execution boundaries and comparator inputs.
 - [Progress reports](reference/progress.md): extraction phases, analysis timing, and estimate limits.
 - [Implementation status](implementation-status.md): verified capabilities and remaining work.
 

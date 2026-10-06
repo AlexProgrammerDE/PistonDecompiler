@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 schemars = { version = "1.2.2", features = ["derive"] }
+rmcp = { version = "3.5.1", features = ["server", "transport-streamable-http-server", "transport-io"] }
 
 [build-dependencies]
 protoc-bin-vendored = "3"

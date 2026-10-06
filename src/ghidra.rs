@@ -49,6 +49,18 @@ impl ExportFunction {
 pub async fn install_scripts(config: &Config) -> Result<PathBuf> {
     let dir = config.data_dir.join("scripts");
     tokio::fs::create_dir_all(&dir).await?;
+    for (name, source) in [
+        (
+            "PistonQuery.java",
+            include_str!("../ghidra/PistonQuery.java"),
+        ),
+        (
+            "PistonAnnotate.java",
+            include_str!("../ghidra/PistonAnnotate.java"),
+        ),
+    ] {
+        tokio::fs::write(dir.join(name), source).await?;
+    }
     tokio::fs::write(
         dir.join("PistonExport.java"),
         include_str!("../ghidra/PistonExport.java"),
@@ -428,7 +440,7 @@ pub async fn execute_apply(
     cancel: Option<CancellationToken>,
 ) -> Result<crate::proto::ApplyOperation> {
     let mut tx = db.pool.begin().await?;
-    let changed=sqlx::query("UPDATE apply_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain') AND NOT EXISTS(SELECT 1 FROM apply_operations other WHERE other.binary_id=apply_operations.binary_id AND other.id<>apply_operations.id AND other.status IN ('applying','uncertain')) AND NOT EXISTS(SELECT 1 FROM type_operations t WHERE t.binary_id=apply_operations.binary_id AND t.status IN ('applying','uncertain'))").bind(operation_id).execute(&mut *tx).await?.rows_affected();
+    let changed=sqlx::query("UPDATE apply_operations SET status='applying',error='' WHERE id=? AND status IN ('preview','uncertain') AND NOT EXISTS(SELECT 1 FROM apply_operations other WHERE other.binary_id=apply_operations.binary_id AND other.id<>apply_operations.id AND other.status IN ('applying','uncertain')) AND NOT EXISTS(SELECT 1 FROM type_operations t WHERE t.binary_id=apply_operations.binary_id AND t.status IN ('applying','uncertain')) AND NOT EXISTS(SELECT 1 FROM research_operations r WHERE r.binary_id=apply_operations.binary_id AND r.status IN ('applying','uncertain'))").bind(operation_id).execute(&mut *tx).await?.rows_affected();
     ensure!(
         changed == 1,
         "Change set is already applied or another unresolved writer owns this binary"
@@ -533,6 +545,14 @@ mod tests {
 
 /// Refresh an existing program without deleting results, reviews, or accounting.
 pub async fn refresh(db: &Db, config: &Config, binary: &str) -> Result<()> {
+    refresh_cancellable(db, config, binary, None).await
+}
+pub async fn refresh_cancellable(
+    db: &Db,
+    config: &Config,
+    binary: &str,
+    cancel: Option<CancellationToken>,
+) -> Result<()> {
     let folder = tokio::fs::canonicalize(config.data_dir.join("binaries").join(binary)).await?;
     let output = folder.join(format!("refresh-{}.jsonl", crate::knowledge::id()));
     headless(
@@ -546,7 +566,7 @@ pub async fn refresh(db: &Db, config: &Config, binary: &str) -> Result<()> {
             "PistonExport.java".into(),
             output.to_string_lossy().into_owned(),
         ],
-        None,
+        cancel,
     )
     .await?;
     refresh_export(db, binary, &output).await

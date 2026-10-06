@@ -21,3 +21,5 @@ vendor/
 
 /.venv-runtime/
 __pycache__/
+*.egg-info/
+/.venv-native/

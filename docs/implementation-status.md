@@ -21,6 +21,9 @@ The architecture documents define the target. The current implementation runs re
 - Persistent iteration status through `recovery-status`.
 - C++ pointer-table and RTTI evidence, runtime virtual dispatch, base layouts, typed vtable data, and stable local-variable refinement.
 - Native Ghidra desktop ownership, save verification, and reopening saved projects without replaying definitions.
+- Bounded function, caller, cross-reference, memory and pointer-table queries through MCP, stdio and the CLI.
+- Durable research annotations and type previews with saved markers, conflict checks and cancellation reconciliation.
+- Build-pinned PE x64 instruction fixtures with Unicorn, Capstone and exact translation comparisons.
 - Live extraction and analysis reports, measured estimates, and downloadable status snapshots.
 
 ## Current boundaries
@@ -47,6 +50,20 @@ Parameter candidates now receive isolated native trials after type writeback. AI
 Uncertain fields are deferred without manual review. Provider errors and unreconciled writeback failures remain explicit operational failures.
 
 ## Validation
+
+Focused research tests cover both headless Ghidra and its live CodeBrowser connection.
+They verify queries, saved annotations, stale preview rejection, type writeback and exact-operation retries.
+MCP tests cover protocol negotiation, shared writer ownership and cancellation cleanup.
+
+```sh
+PISTON_TEST_GHIDRA_HOME=/path/to/ghidra \
+  cargo test --lib research::tests::native_focused -- --ignored
+```
+
+Set `PISTON_TEST_GHIDRA_DESKTOP=1` to run this fixture through the live desktop bridge on a test display.
+The focused research round trip has passed on Linux with Ghidra 12.0.4 and JDK 25.
+The synthetic native-runner tests run in CI on Ubuntu, Windows and macOS.
+These jobs verify instruction fixtures, rather than native game joins on those platforms.
 
 Targeted tests cover dependency barriers, recursive snapshots, runtime identity, allocation bounds, idempotent import, and invalid layouts.
 A real Ghidra round trip creates a structure, applies a method signature, and re-decompiles field accesses.

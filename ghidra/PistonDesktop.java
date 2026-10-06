@@ -112,6 +112,8 @@ public class PistonDesktop implements GhidraLaunchable {
                     case "PistonTypes.java" -> new PistonTypes();
                     case "PistonParameters.java" -> new PistonParameters();
                     case "PistonApply.java" -> new PistonApply();
+                    case "PistonQuery.java" -> new PistonQuery();
+                    case "PistonAnnotate.java" -> new PistonAnnotate();
                     default -> throw new IllegalArgumentException("Unsupported Piston operation");
                 };
                 String[] args = gson.fromJson(request.get("args"), String[].class);
@@ -125,7 +127,7 @@ public class PistonDesktop implements GhidraLaunchable {
                     success = true;
                 } finally { program.endTransaction(transaction, success); }
                 // Saving also persists the operation's reconciliation marker before acknowledging it.
-                if (name.equals("PistonParameters.java") || name.equals("PistonRuntime.java") || name.equals("PistonApply.java") || (name.equals("PistonTypes.java") && args[0].equals("apply"))) {
+                if ((script instanceof PistonAnnotate annotations && annotations.applied()) || name.equals("PistonParameters.java") || name.equals("PistonRuntime.java") || name.equals("PistonApply.java") || (name.equals("PistonTypes.java") && args[0].equals("apply"))) {
                     Swing.runNow(() -> tool.prepareToSave(program));
                     while (!program.lock("Save Piston changes")) {
                         monitor.checkCancelled();
@@ -137,6 +139,7 @@ public class PistonDesktop implements GhidraLaunchable {
                         if(script instanceof PistonTypes types) types.verifyApplied();
                         if(script instanceof PistonParameters parameters) parameters.verifyApplied();
                         if(script instanceof PistonApply names) names.verifyApplied();
+                        if(script instanceof PistonAnnotate annotations) annotations.verifyApplied();
                     }
                     finally { program.unlock(); }
                 }
