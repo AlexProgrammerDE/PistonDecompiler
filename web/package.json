@@ -21,7 +21,7 @@
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@fontsource-variable/space-grotesk": "^5.3.0",
     "@phosphor-icons/react": "^2.1.10",
-    "@tanstack/charts": "0.18.0",
+    "@tanstack/charts": "1.1.0",
     "@tanstack/react-devtools": "^0.10.0",
     "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-pacer": "^0.23.0",
